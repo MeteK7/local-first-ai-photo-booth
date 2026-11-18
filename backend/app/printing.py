@@ -22,7 +22,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.config import ROOT, Settings
 from app.db import Base
 from app.media import asset_path
-from app.photos import ResultKind, require_result, require_session, stored_file
+from app.photos import require_session, stored_file
+from app.results import RESULT_AREAS, PhotoResultKind, require_owned_result
 
 router = APIRouter(prefix="/api/sessions/current/photos/print-jobs", tags=["printing"])
 log = logging.getLogger("uvicorn.error")
@@ -44,7 +45,7 @@ class PrintState(StrEnum):
 class PrintJob(Base):
     __tablename__ = "print_jobs"
     __table_args__ = (
-        CheckConstraint("(original_id IS NULL) <> (filmstrip_id IS NULL)", name="print_job_one_asset"),
+        CheckConstraint("num_nonnulls(original_id, filmstrip_id, effect_id) = 1", name="print_job_one_asset"),
         CheckConstraint("state IN ('queued', 'submitting', 'submitted', 'sent', 'failed', 'unknown')",
                         name="print_job_state"),
         Index("ix_print_jobs_state_updated_at", "state", "updated_at"),
@@ -53,6 +54,7 @@ class PrintJob(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True)
     original_id: Mapped[UUID | None] = mapped_column(ForeignKey("original_photos.id"), unique=True)
     filmstrip_id: Mapped[UUID | None] = mapped_column(ForeignKey("filmstrips.id"), unique=True)
+    effect_id: Mapped[UUID | None] = mapped_column(ForeignKey("ai_jobs.id"), unique=True)
     printer: Mapped[str]
     state: Mapped[str] = mapped_column(String(16))
     detail: Mapped[str]
@@ -62,7 +64,7 @@ class PrintJob(Base):
 
 class PrintRequest(BaseModel):
     asset_id: UUID
-    kind: ResultKind
+    kind: PhotoResultKind
 
 
 class PrintView(BaseModel):
@@ -83,17 +85,17 @@ def printer_configured(settings: Settings) -> bool:
     return bool(settings.printer_name) and sys.platform == "win32"
 
 
-def result_job(db, asset_id: UUID, kind: ResultKind) -> PrintJob | None:
-    column = PrintJob.original_id if kind == "original" else PrintJob.filmstrip_id
+def result_job(db, asset_id: UUID, kind: PhotoResultKind) -> PrintJob | None:
+    column = {"original": PrintJob.original_id, "filmstrip": PrintJob.filmstrip_id, "effect": PrintJob.effect_id}[kind]
     return db.scalar(select(PrintJob).where(column == asset_id))
 
 
 @router.get("", response_model=PrintView | None)
-def print_status(asset_id: UUID, kind: ResultKind, request: Request,
+def print_status(asset_id: UUID, kind: PhotoResultKind, request: Request,
                  booth_customer: str | None = Cookie(default=None)):
     with request.app.state.db() as db:
         session = require_session(db, booth_customer)
-        require_result(db, session.id, asset_id, kind)
+        require_owned_result(db, session.id, asset_id, kind)
         return result_job(db, asset_id, kind)
 
 
@@ -103,19 +105,20 @@ def request_print(body: PrintRequest, request: Request, response: Response,
     settings = request.app.state.settings
     with request.app.state.db.begin() as db:
         session = require_session(db, booth_customer, lock=True)
-        asset = require_result(db, session.id, body.asset_id, body.kind)
+        asset = require_owned_result(db, session.id, body.asset_id, body.kind)
         job = result_job(db, asset, body.kind)
         if job is not None and job.state != PrintState.FAILED:
             response.status_code = 200
             return job
         if not printer_configured(settings):
             raise HTTPException(503, "Printing is unavailable on this booth.")
-        stored_file(request, "originals" if body.kind == "original" else "processed", asset)
+        stored_file(request, RESULT_AREAS[body.kind], asset)
         now = datetime.now(UTC)
         if job is None:
             job = PrintJob(
                 id=uuid4(), created_at=now, original_id=asset if body.kind == "original" else None,
                 filmstrip_id=asset if body.kind == "filmstrip" else None,
+                effect_id=asset if body.kind == "effect" else None,
             )
             db.add(job)
         job.printer = settings.printer_name
@@ -177,9 +180,14 @@ def process_print_queue(settings: Settings, sessions) -> None:
     elif job.printer != settings.printer_name:
         result = SpoolResult(PrintState.FAILED, "The configured printer changed. Check it and try again.")
     else:
-        area, asset = ("originals", job.original_id) if job.original_id else ("processed", job.filmstrip_id)
+        if job.effect_id:
+            kind, asset = "effect", job.effect_id
+        elif job.filmstrip_id:
+            kind, asset = "filmstrip", job.filmstrip_id
+        else:
+            kind, asset = "original", job.original_id
         try:
-            image = asset_path(settings.data_root, area, asset)
+            image = asset_path(settings.data_root, RESULT_AREAS[kind], asset)
             if not image.is_file():
                 raise FileNotFoundError
         except (OSError, ValueError):

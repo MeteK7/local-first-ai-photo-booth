@@ -163,14 +163,19 @@ def start_transform(body: TransformRequest, request: Request, response: Response
         return job
 
 
+def require_completed_effect(db, session_id: UUID, job_id: UUID) -> UUID:
+    result = db.scalar(select(AIJob.id).join(OriginalPhoto, AIJob.original_id == OriginalPhoto.id).where(
+        AIJob.id == job_id, AIJob.state == JobState.COMPLETED, OriginalPhoto.session_id == session_id,
+    ))
+    if result is None:
+        raise HTTPException(404, "Photo result not found.")
+    return result
+
+
 def completed_file(job_id: UUID, request: Request, token: str | None):
     with request.app.state.db() as db:
         session = require_session(db, token)
-        result = db.scalar(select(AIJob.id).join(OriginalPhoto, AIJob.original_id == OriginalPhoto.id).where(
-            AIJob.id == job_id, AIJob.state == JobState.COMPLETED, OriginalPhoto.session_id == session.id,
-        ))
-    if result is None:
-        raise HTTPException(404, "Photo result not found.")
+        result = require_completed_effect(db, session.id, job_id)
     return stored_file(request, "ai-generated", result)
 
 

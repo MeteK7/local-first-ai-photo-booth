@@ -27,7 +27,7 @@ log = logging.getLogger("uvicorn.error")
 LOCAL_ORIGINS = {
     f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (4200, 8000)
 }
-SCHEMA_REVISION = "20261118_05"
+SCHEMA_REVISION = "20261118_07"
 
 
 def create_app(settings: Settings | None = None, *, image_provider: ImageProvider | None = None) -> FastAPI:

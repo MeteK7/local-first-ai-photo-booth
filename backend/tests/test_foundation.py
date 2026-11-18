@@ -310,6 +310,122 @@ def seed_effect_original(app, settings, session_id, jpeg, width=60, height=40):
     return photo
 
 
+def test_effect_phone_link_only_serves_its_completed_result_until_expiry_or_cancel(settings):
+    app = create_app(settings)
+    provider = LocalPreviewProvider()
+    interface = IPv4Interface("192.168.42.7/24")
+    lan_base = f"http://{interface.ip}:8001"
+    lan = create_delivery_app(settings.model_copy(update={"download_bind": interface}), app.state.db)
+    effects = "/api/sessions/current/photos/ai"
+    links = "/api/sessions/current/photos/phone-links"
+    with BytesIO() as output, Image.new("RGB", (60, 40), (225, 80, 50)) as image:
+        image.save(output, format="JPEG")
+        original = output.getvalue()
+
+    def queue_effect(kiosk):
+        session = kiosk.post("/api/sessions", headers=HEADERS).raise_for_status().json()
+        photo = seed_effect_original(app, settings, session["id"], original)
+        job = kiosk.post(effects, headers=HEADERS, json={
+            "asset_id": str(photo), "template_id": "cinematic-portrait", "consent": True,
+        }).raise_for_status().json()
+        return photo, {"asset_id": job["id"], "kind": "effect"}
+
+    with (
+        TestClient(app, base_url=BASE) as owner,
+        TestClient(app, base_url=BASE) as other,
+        TestClient(lan, base_url=lan_base, client=("192.168.42.100", 50000)) as phone,
+        TestClient(lan, base_url=lan_base, client=("192.168.43.100", 50000)) as external,
+    ):
+        app.state.image_provider = provider
+        app.state.download_base = lan_base
+        photo, effect = queue_effect(owner)
+        assert owner.post(links, json=effect, headers=HEADERS).status_code == 404
+        run_job(settings, app.state.db, provider)
+        _, other_effect = queue_effect(other)
+        run_job(settings, app.state.db, provider)
+        assert other.post(links, json=effect, headers=HEADERS).status_code == 404
+        assert owner.post(links, json=other_effect, headers=HEADERS).status_code == 404
+
+        processed = owner.get(f"{effects}/{effect['asset_id']}/download").raise_for_status().content
+        grant = owner.post(links, json=effect, headers=HEADERS).raise_for_status().json()
+        original_grant = owner.post(links, json={"asset_id": str(photo), "kind": "original"},
+                                    headers=HEADERS).raise_for_status().json()
+        path = urlsplit(grant["url"]).path
+        assert path != urlsplit(original_grant["url"]).path
+        response = phone.get(path).raise_for_status()
+        assert response.content == processed and response.content != original
+        assert 'filename="photo-booth-effect.jpg"' in response.headers["content-disposition"]
+        assert phone.get(urlsplit(original_grant["url"]).path).content == original
+        assert external.get(path).status_code == 404
+        assert phone.get(f"{effects}/{effect['asset_id']}/download").status_code == 404
+
+        owner.post("/api/sessions/current/finish", json={"state": "completed"}, headers=HEADERS).raise_for_status()
+        assert phone.get(path).content == processed
+        with app.state.db.begin() as db:
+            stored = db.get(DownloadLink, token_digest(path.removeprefix("/d/")))
+            assert stored.effect_id == UUID(effect["asset_id"])
+            stored.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        assert phone.get(path).status_code == 404
+        other_link = other.post(links, json=other_effect, headers=HEADERS).raise_for_status().json()
+        other_path = urlsplit(other_link["url"]).path
+        assert phone.get(other_path).status_code == 200
+        other.post("/api/sessions/current/finish", json={"state": "canceled"}, headers=HEADERS).raise_for_status()
+        assert phone.get(other_path).status_code == 404
+
+
+def test_print_effect_uses_completed_jpeg_and_a_separate_job_from_original(settings, monkeypatch):
+    app = create_app(settings)
+    provider = LocalPreviewProvider()
+    endpoint = "/api/sessions/current/photos/print-jobs"
+    queued_calls = []
+
+    def spool(job, image):
+        queued_calls.append((str(job.id), image, image.read_bytes()))
+        return printing.SpoolResult(printing.PrintState.SENT, "Sent to the printer.")
+
+    monkeypatch.setattr(printing, "windows_job", spool)
+    with BytesIO() as output, Image.new("RGB", (60, 40), (225, 80, 50)) as image:
+        image.save(output, format="JPEG")
+        original = output.getvalue()
+    with TestClient(app, base_url=BASE) as owner, TestClient(app, base_url=BASE) as other:
+        session = owner.post("/api/sessions", headers=HEADERS).raise_for_status().json()
+        other.post("/api/sessions", headers=HEADERS).raise_for_status()
+        photo = seed_effect_original(app, settings, session["id"], original)
+        app.state.image_provider = provider
+        settings.printer_name = "Isolated test queue"
+        monkeypatch.setattr(printing, "printer_configured", lambda config: bool(config.printer_name))
+        effects = "/api/sessions/current/photos/ai"
+        requested = owner.post(effects, headers=HEADERS, json={
+            "asset_id": str(photo), "template_id": "cinematic-portrait", "consent": True,
+        }).raise_for_status().json()
+        effect_id = requested["id"]
+        effect_asset = {"asset_id": effect_id, "kind": "effect"}
+        original_asset = {"asset_id": str(photo), "kind": "original"}
+        assert owner.get(endpoint, params=effect_asset).status_code == 404
+        assert owner.post(endpoint, json=effect_asset, headers=HEADERS).status_code == 404
+
+        run_job(settings, app.state.db, provider)
+        effect = owner.get(f"{effects}/{effect_id}/download").raise_for_status().content
+        assert effect != original
+        assert other.get(endpoint, params=effect_asset).status_code == 404
+        assert other.post(endpoint, json=effect_asset, headers=HEADERS).status_code == 404
+        assert owner.get(endpoint, params=effect_asset).json() is None
+        queued_effect = owner.post(endpoint, json=effect_asset, headers=HEADERS)
+        assert queued_effect.status_code == 202
+        effect_print_id = queued_effect.json()["id"]
+        duplicate = owner.post(endpoint, json=effect_asset, headers=HEADERS)
+        assert duplicate.status_code == 200 and duplicate.json()["id"] == effect_print_id
+        printing.process_print_queue(settings, app.state.db)
+        assert queued_calls == [(effect_print_id, asset_path(settings.data_root, "ai-generated", UUID(effect_id)), effect)]
+        assert owner.get(endpoint, params=effect_asset).json()["state"] == "sent"
+        assert owner.get(endpoint, params=original_asset).json() is None
+
+        queued_original = owner.post(endpoint, json=original_asset, headers=HEADERS)
+        assert queued_original.status_code == 202 and queued_original.json()["id"] != effect_print_id
+        printing.process_print_queue(settings, app.state.db)
+        assert queued_calls[1] == (queued_original.json()["id"], asset_path(settings.data_root, "originals", photo), original)
+
+
 def test_photo_effect_async_consent_and_result_isolation(settings):
     started, release = Event(), Event()
     uploads = []
