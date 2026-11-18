@@ -1,8 +1,9 @@
 :root {
   color-scheme: dark;
   font-family: "Segoe UI", system-ui, sans-serif;
-  background: #182130;
+  background: var(--page-background);
   color: #f2f5fa;
+  --page-background: #182130;
   --surface: linear-gradient(150deg, #29364a, #1c2431 60%);
   --muted: #bac7d8;
   --line: #394555;
@@ -16,6 +17,9 @@
   --shutter-disc: #b9cee9;
   --danger: #ffc7d1;
 }
+:root:has(.welcome, .session) {
+  background-color: color-mix(in srgb, var(--page-background) 40%, black);
+}
 * { box-sizing: border-box; }
 body { margin: 0; }
 a { color: inherit; }
@@ -27,6 +31,7 @@ button:disabled { cursor: default; opacity: .47; }
 .site-header {
   min-height: 74px; display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding: 10px clamp(18px, 5vw, 76px); border-bottom: 1px solid var(--line);
+  background: var(--page-background);
 }
 .brand, .quiet-link { display: inline-flex; align-items: center; min-height: 44px; text-decoration: none; }
 .brand { gap: 12px; font-size: .82rem; letter-spacing: .13em; font-weight: 700; }
