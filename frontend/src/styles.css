@@ -61,7 +61,10 @@ p, dt { color: var(--muted); line-height: 1.6; }
 .lens-panel {
   min-height: 390px; display: grid; place-items: center; border: 1px solid var(--line);
   border-radius: 18px; overflow: hidden;
-  background: radial-gradient(ellipse at 75% 15%, #43536d 0%, #253247 50%, #1c2431 100%);
+  background:
+    linear-gradient(to top right, rgb(0 0 0 / 50%), rgb(0 0 0 / 46%) 30%,
+      rgb(0 0 0 / 23%) 54%, transparent 86%),
+    radial-gradient(ellipse at 75% 15%, #43536d 0%, #253247 50%, #1c2431 100%);
 }
 .lens {
   width: 68%; aspect-ratio: 1; border-radius: 50%; border: 1px solid #778aa6;
