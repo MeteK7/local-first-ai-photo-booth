@@ -4,7 +4,7 @@ Set `PHOTOBOOTH_AI_MODE=preview` in the booth's local `.env`, run `.\.venv\Scrip
 
 1. Start a **Single photo** session and take a photo.
 2. Open **AI photo preview** on the result. Select the consent checkbox under **Local test effect** and choose **Create test image**.
-3. Wait for **Your photo effect is ready**. Use **Download effect** before finishing the session. **Download photo** serves the original.
+3. Wait for **Your photo effect is ready**. Use **Download effect**, **Download effect on phone**, or **Print effect** beneath the processed image. The original has its own download and print controls. Create the phone QR before finishing the session. The QR remains valid until it expires.
 
 The Cinematic portrait test uses a fixed Pillow color grade. It runs in a background worker, stores job state in PostgreSQL, and saves its JPEG in `ai-generated`. Camera JPEGs stay in `originals`. Both results require the active session. If the local processor reports a failure, the customer can download the original or consent to try again. A job left in progress after a restart is marked interrupted once its five-minute timeout elapses. The test needs no network connection, provider credentials, or AI service.
 

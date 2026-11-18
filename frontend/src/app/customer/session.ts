@@ -1,75 +1,79 @@
-import { DatePipe } from '@angular/common';
-import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
+import { Component, computed, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { Api, CameraStatus, message, PhoneLink, Photo, PhotoFile, PrintJob, Session } from '../shared/api';
+import { Api, CameraStatus, message, Photo, PhotoFile, Session } from '../shared/api';
 import { AiPhotoPanel } from './ai-photo';
+import { PhotoPrintAction } from './photo-print';
+import { PhoneDownloadAction } from './phone-download';
 
 @Component({
   selector: 'app-session',
-  imports: [RouterLink, DatePipe, AiPhotoPanel],
+  imports: [RouterLink, AiPhotoPanel, PhotoPrintAction, PhoneDownloadAction],
   template: `
-    <section class="panel session">
-      <h1>Your session</h1>
+    <section class="panel session" aria-labelledby="session-title">
+      <header class="session-header">
+        <h1 id="session-title">Your session</h1>
+        @if (active()) {
+          <p class="session-mode">{{ isFilmstrip() ? 'Classic filmstrip' : 'Single photo' }}</p>
+        }
+      </header>
       @if (loading()) { <p role="status">Checking your session…</p> }
       @else if (active()) {
-        @if (isFilmstrip() && !photo() && !filmstripComplete()) {
-          <p role="status">Photo {{ shotsTaken() + 1 }} of {{ shotsRequired() }}</p>
-        }
         @if (photo(); as result) {
-          <div class="photo-stage">
-            <img [src]="api.photoUrl(result, 'preview', experience())"
-                 [alt]="isFilmstrip() ? 'Your Classic filmstrip' : 'Your captured photo'">
-          </div>
-        } @else if (filmstripComplete()) {
-          <div class="camera-state" role="status">{{ busy() ? 'Creating your filmstrip…' : 'Your three photos are ready.' }}</div>
-        } @else if (frameUrl(); as frame) {
-          <div class="photo-stage">
-            <img [src]="frame" alt="Live view from the booth camera">
-            @if (countdown(); as seconds) { <div class="countdown" role="status">{{ seconds }}</div> }
-            @if (capturing()) { <div class="countdown progress" role="status">Saving your photo…</div> }
-          </div>
-        } @else {
-          <div class="camera-state" role="status">{{ cameraCaption() }}</div>
-        }
-        <div class="actions">
-          @if (photo(); as result) {
-            <a class="primary" [href]="api.photoUrl(result, 'download', experience())"
-               [attr.download]="isFilmstrip() ? 'classic-filmstrip.jpg' : 'photo-booth.jpg'">
-              {{ isFilmstrip() ? 'Download filmstrip' : 'Download photo' }}
-            </a>
-            <button type="button" class="secondary" [disabled]="busy() || sharing()" (click)="downloadOnPhone(result)">
-              {{ sharing() ? 'Creating QR code…' : phoneLink() ? 'New QR code' : 'Download on phone' }}
-            </button>
-            @if (!printJob() || printJob()?.state === 'failed') {
-              <button type="button" class="secondary" [disabled]="busy() || printing()" (click)="printResult(result)">
-                {{ printing() ? 'Sending print…' : printJob() ? 'Retry print' : 'Print' }}
-              </button>
-            }
-          } @else if (filmstripComplete()) {
-            <button type="button" class="primary" [disabled]="busy()" (click)="retryFilmstrip()">Create filmstrip</button>
-          } @else {
-            <button type="button" class="primary" [disabled]="busy() || !frameUrl() || camera()?.state !== 'ready'"
-                    (click)="takePhoto()">
-              {{ isFilmstrip() ? (shotsTaken() ? 'Continue filmstrip' : 'Take three photos') : 'Take photo' }}
-            </button>
-          }
-          <button type="button" class="secondary" [disabled]="busy() || sharing() || printing()" (click)="finish('completed')">Finish session</button>
-          <button type="button" class="secondary" [disabled]="busy() || sharing() || printing()" (click)="finish('canceled')">Cancel</button>
-        </div>
-        @if (printJob(); as job) { <p class="print-status" role="status">{{ job.detail }}</p> }
-        @if (printError()) { <p class="error" role="alert">{{ printError() }}</p> }
-        @if (phoneLink(); as link) {
-          <section class="phone-download" aria-label="Phone download">
-            <img [src]="link.qr_image" alt="QR code to download this photo on your phone">
-            <div>
-              <p>Connect to the same Wi-Fi as the booth, then scan the code with your phone camera.</p>
-              <p>Expires at {{ link.expires_at | date:'shortTime' }}.</p>
+          <section class="session-result" aria-labelledby="session-result-title">
+            <h2 id="session-result-title">{{ isFilmstrip() ? 'Your filmstrip' : 'Original photo' }}</h2>
+            <div class="photo-stage">
+              <img [src]="api.photoUrl(result, 'preview', experience())"
+                   [alt]="isFilmstrip() ? 'Your Classic filmstrip' : 'Your captured photo'">
+            </div>
+            <div class="actions result-actions" role="group" [attr.aria-label]="isFilmstrip() ? 'Filmstrip actions' : 'Original photo actions'">
+              <a class="primary icon-action" [href]="api.photoUrl(result, 'download', experience())"
+                 [attr.download]="isFilmstrip() ? 'classic-filmstrip.jpg' : 'photo-booth.jpg'">
+                <span class="action-icon download-icon" aria-hidden="true"></span>
+                <span>{{ isFilmstrip() ? 'Download filmstrip' : 'Download photo' }}</span>
+              </a>
+              <app-phone-download [assetId]="result.id" [kind]="isFilmstrip() ? 'filmstrip' : 'original'" [disabled]="busy()" />
+              <app-photo-print [assetId]="result.id" [kind]="isFilmstrip() ? 'filmstrip' : 'original'" [disabled]="busy()" />
             </div>
           </section>
+          @if (!isFilmstrip()) { <app-ai-photo [photo]="result" [sessionBusy]="busy()" /> }
+        } @else {
+          <div class="session-capture">
+            @if (isFilmstrip() && !filmstripComplete()) {
+              <p class="session-progress" role="status">Photo {{ shotsTaken() + 1 }} of {{ shotsRequired() }}</p>
+            }
+            @if (filmstripComplete()) {
+              <div class="camera-state" role="status">{{ busy() ? 'Creating your filmstrip…' : 'Your three photos are ready.' }}</div>
+              <button type="button" class="primary" [disabled]="busy()" (click)="retryFilmstrip()">Create filmstrip</button>
+            } @else {
+              @if (frameUrl(); as frame) {
+                <div class="photo-stage">
+                  <img [src]="frame" alt="Live view from the booth camera">
+                  @if (countdown(); as seconds) { <div class="countdown" role="status">{{ seconds }}</div> }
+                  @if (capturing()) { <div class="countdown progress" role="status">Saving your photo…</div> }
+                </div>
+              } @else {
+                <div class="camera-state" role="status">{{ cameraCaption() }}</div>
+              }
+              <button type="button" class="primary icon-action capture-action"
+                      [disabled]="busy() || !frameUrl() || camera()?.state !== 'ready'"
+                      (click)="takePhoto()">
+                <span class="shutter-disc" aria-hidden="true"><span class="action-icon shutter-icon"></span></span>
+                <span>{{ isFilmstrip() ? (shotsTaken() ? 'Continue filmstrip' : 'Take three photos') : 'Take photo' }}</span>
+              </button>
+            }
+          </div>
         }
-        @if (photo(); as source) {
-          @if (!isFilmstrip()) { <app-ai-photo [photo]="source" /> }
-        }
+        <footer class="session-end">
+          @if (photo()) {
+            <p class="session-end-note">Finishing keeps QR links active until they expire. Canceling revokes them immediately.</p>
+          }
+          <div class="session-end-actions" role="group" aria-label="End your session">
+            <button type="button" class="secondary session-cancel" [disabled]="busy() || sharing() || printing()"
+                    (click)="finish('canceled')">Cancel session</button>
+            <button type="button" class="secondary session-finish" [disabled]="busy() || sharing() || printing()"
+                    (click)="finish('completed')">Finish session</button>
+          </div>
+        </footer>
       } @else {
         <p>{{ error() ? 'Session status could not be loaded.' : 'There is no active session.' }}</p>
         <a class="secondary" routerLink="/">Back to welcome</a>
@@ -89,11 +93,11 @@ export class SessionPage implements OnInit, OnDestroy {
   readonly camera = signal<CameraStatus | null>(null);
   readonly frameUrl = signal<string | null>(null);
   readonly photo = signal<PhotoFile | null>(null);
-  readonly phoneLink = signal<PhoneLink | null>(null);
-  readonly sharing = signal(false);
-  readonly printJob = signal<PrintJob | null>(null);
-  readonly printing = signal(false);
-  readonly printError = signal('');
+  private readonly printAction = viewChild(PhotoPrintAction);
+  private readonly phoneDownload = viewChild(PhoneDownloadAction);
+  private readonly aiPanel = viewChild(AiPhotoPanel);
+  readonly printing = computed(() => this.printAction()?.pending() || this.aiPanel()?.printing() || false);
+  readonly sharing = computed(() => this.phoneDownload()?.pending() || this.aiPanel()?.sharing() || false);
   readonly countdown = signal(0);
   readonly capturing = signal(false);
   readonly shotsTaken = signal(0);
@@ -103,7 +107,6 @@ export class SessionPage implements OnInit, OnDestroy {
   readonly filmstripComplete = computed(() => this.isFilmstrip() && this.shotsTaken() === this.shotsRequired());
   private stopped = false;
   private timer?: ReturnType<typeof setTimeout>;
-  private printTimer?: ReturnType<typeof setTimeout>;
   private cameraUpdate?: Promise<void>;
   private requestId?: string;
 
@@ -132,13 +135,6 @@ export class SessionPage implements OnInit, OnDestroy {
     if (!this.photo()) {
       if (this.filmstripComplete()) await this.retryFilmstrip();
       else this.startCameraUpdate();
-    } else {
-      this.printing.set(true);
-      try {
-        await this.refreshPrint(this.photo()!);
-      } finally {
-        this.printing.set(false);
-      }
     }
   }
 
@@ -252,50 +248,6 @@ export class SessionPage implements OnInit, OnDestroy {
     }
   }
 
-  async downloadOnPhone(result: PhotoFile): Promise<void> {
-    if (this.busy() || this.sharing()) return;
-    this.sharing.set(true);
-    this.error.set('');
-    try {
-      this.phoneLink.set(await this.api.createPhoneLink(result, this.experience()));
-    } catch (error) {
-      this.error.set(message(error, 'Could not create a phone download link.'));
-    } finally {
-      this.sharing.set(false);
-    }
-  }
-
-  async printResult(photo: PhotoFile): Promise<void> {
-    if (this.printing() || this.busy()) return;
-    this.printing.set(true);
-    this.printError.set('');
-    try {
-      this.printJob.set(await this.api.print(photo, this.experience()));
-      this.watchPrint(photo);
-    } catch (error) {
-      this.printError.set(message(error, 'Could not send the print. Try again to check the same job.'));
-    } finally {
-      this.printing.set(false);
-    }
-  }
-
-  private async refreshPrint(photo: PhotoFile): Promise<void> {
-    try {
-      this.printJob.set(await this.api.printStatus(photo, this.experience()));
-      this.printError.set('');
-    } catch {
-      this.printError.set('Could not check the print status.');
-    }
-    this.watchPrint(photo);
-  }
-
-  private watchPrint(photo: PhotoFile): void {
-    const state = this.printJob()?.state;
-    if (!this.stopped && this.active() && (state === 'queued' || state === 'submitting' || state === 'submitted')) {
-      this.printTimer = setTimeout(() => void this.refreshPrint(photo), 1800);
-    }
-  }
-
   async finish(state: 'completed' | 'canceled'): Promise<void> {
     if (this.busy() || this.sharing() || this.printing()) return;
     this.busy.set(true);
@@ -303,7 +255,6 @@ export class SessionPage implements OnInit, OnDestroy {
     try {
       await this.api.finish(state);
       this.active.set(null);
-      this.phoneLink.set(null);
       await this.router.navigateByUrl('/');
     } catch (error) {
       this.error.set(message(error, 'Could not end the session. Please try again.'));
@@ -315,7 +266,6 @@ export class SessionPage implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.stopped = true;
     clearTimeout(this.timer);
-    clearTimeout(this.printTimer);
     this.setFrame(null);
   }
 }

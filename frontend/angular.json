@@ -16,6 +16,9 @@
             "browser": "src/main.ts",
             "index": "src/index.html",
             "tsConfig": "tsconfig.app.json",
+            "assets": [
+              { "glob": "lucide-license.txt", "input": "src/icons", "output": "licenses" }
+            ],
             "styles": [
               "src/styles.css"
             ]

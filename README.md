@@ -68,7 +68,7 @@ Set `PHOTOBOOTH_AI_MODE=preview` in `.env`, apply the database migrations, and r
 
 ## Download on a phone
 
-Choose **Download on phone** on a photo or filmstrip result and scan the QR code with a phone on the same Wi-Fi. A code expires after 10 minutes by default. Finishing the session keeps the link usable until expiry. Canceling the session invalidates the link.
+Choose **Download on phone** on a photo or filmstrip result, or **Download effect on phone** below the processed image. Scan the QR code with a phone on the same Wi-Fi. Each code downloads the version shown above it. A code expires after 10 minutes by default. Finishing the session keeps the link usable until expiry. Canceling the session invalidates the link.
 
 Set `PHOTOBOOTH_DOWNLOAD_BIND` in the project’s `.env` to the booth’s private IPv4 address and subnet prefix, such as `192.168.1.20/24`. Restart the booth after changing it. The download listener defaults to port 8001. The booth and admin interface use loopback port 8000.
 
@@ -76,7 +76,7 @@ Set `PHOTOBOOTH_DOWNLOAD_TTL_MINUTES` to adjust expiry, or `PHOTOBOOTH_DOWNLOAD_
 
 ## Print a result
 
-Choose **Print** on a photo or filmstrip result. The booth sends one copy to the local Windows printer and shows the job status. **Retry print** appears when the booth can confirm the job failed before it was submitted. If Windows reports an uncertain result, check the output tray or the Windows queue.
+Choose **Print** on a photo or filmstrip result, or **Print effect** under the processed preview. The booth sends one copy of the selected version to the local Windows printer and shows the job status. A retry appears when the booth can confirm the job failed before it was submitted. If Windows reports an uncertain result, check the output tray or the Windows queue.
 
 Set `PHOTOBOOTH_PRINTER_NAME` in the project’s `.env` to the installed Windows queue name and restart the booth. The Epson L3356 uses `EPSON L3350 Series` on the test workstation. The booth fits a photo into a 6 × 4 in. area and a filmstrip into a 2 × 6 in. portrait area. It uses the queue’s configured paper size. See `docs/testing/stage5-printing.md` for details.
 

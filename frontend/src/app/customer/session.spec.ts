@@ -42,6 +42,7 @@ describe('Session page', () => {
       id: 'saved-photo', captured_at: date, byte_size: 200, width: 6000, height: 4000,
     });
     await Promise.resolve();
+    fixture.detectChanges();
     http.expectOne(request => request.url.endsWith('/print-jobs') && request.method === 'GET').flush(null);
     await fixture.whenStable();
     fixture.detectChanges();

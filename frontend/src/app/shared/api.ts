@@ -53,6 +53,8 @@ export interface PrintJob {
   detail: string;
 }
 
+export type PhotoResultKind = 'original' | 'filmstrip' | 'effect';
+
 export interface EffectJob {
   id: string;
   template_id: string;
@@ -106,20 +108,18 @@ export class Api {
   }
   filmstrip() { return firstValueFrom(this.http.get<FilmstripProgress>(`${photos}/filmstrip`)); }
   composeFilmstrip() { return firstValueFrom(this.http.post<PhotoFile>(`${photos}/filmstrip`, {})); }
-  createPhoneLink(photo: PhotoFile, experience: Experience) {
+  createPhoneLink(assetId: string, kind: PhotoResultKind) {
     return firstValueFrom(this.http.post<PhoneLink>(`${photos}/phone-links`, {
-      asset_id: photo.id,
-      kind: experience === 'filmstrip' ? 'filmstrip' : 'original',
+      asset_id: assetId, kind,
     }));
   }
-  printStatus(photo: PhotoFile, experience: Experience) {
-    const params = { asset_id: photo.id, kind: experience === 'filmstrip' ? 'filmstrip' : 'original' };
+  printStatus(assetId: string, kind: PhotoResultKind) {
+    const params = { asset_id: assetId, kind };
     return firstValueFrom(this.http.get<PrintJob | null>(`${photos}/print-jobs`, { params }));
   }
-  print(photo: PhotoFile, experience: Experience) {
+  print(assetId: string, kind: PhotoResultKind) {
     return firstValueFrom(this.http.post<PrintJob>(`${photos}/print-jobs`, {
-      asset_id: photo.id,
-      kind: experience === 'filmstrip' ? 'filmstrip' : 'original',
+      asset_id: assetId, kind,
     }));
   }
   effects(photo: PhotoFile) {
