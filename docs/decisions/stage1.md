@@ -1,0 +1,7 @@
+# Stage 1 decisions
+
+- **Local execution.** A single loopback FastAPI process serves both the built browser application and its API. In development, Angular proxies relative API requests. The production-style start script uses a single Uvicorn worker so future camera ownership can remain local to one process.
+- **Persistence.** Alembic owns schema changes. The application connects with a non-superuser PostgreSQL account. Tests use a specifically named local test database and avoid resets. Media directories live under a configurable local data root and are never mounted as static assets.
+- **Customer sessions.** A random browser cookie identifies one active session without exposing the persisted credential digest. Finishing or canceling a session changes its state transactionally and clears the cookie. The server rejects expired session credentials. The admin overview derives an expired display state for old active records.
+- **Administrative access.** Public kiosk and authenticated admin APIs have distinct routes and cookie scopes. Administrator passwords are hashed with scrypt using Python's standard library. Login credentials are verified on the server, logins expire, and sign-out revokes the stored login. Mutations require a custom header and reject origins outside the supported loopback ports.
+- **Hardware status.** The API reports camera availability honestly and the UI disables capture. Discovery and camera control arrive with the actual D5600 integration, inside the same application.

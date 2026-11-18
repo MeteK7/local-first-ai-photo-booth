@@ -1,0 +1,175 @@
+"""Issue phone links locally and serve only the linked file on the LAN listener."""
+
+import asyncio
+import logging
+import re
+import socket
+from base64 import b64encode
+from contextlib import asynccontextmanager, nullcontext
+from datetime import UTC, datetime, timedelta
+from io import BytesIO
+from ipaddress import IPv4Address
+from uuid import UUID
+
+import qrcode
+import uvicorn
+from fastapi import APIRouter, Cookie, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, PlainTextResponse
+from pydantic import BaseModel
+from qrcode.image.pil import PilImage
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, delete, select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Mapped, mapped_column
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from app.config import Settings
+from app.db import Base
+from app.photos import Filmstrip, OriginalPhoto, ResultKind, require_result, require_session, stored_file
+from app.security import issue_token, token_digest
+from app.sessions import BoothSession, State
+
+log = logging.getLogger("uvicorn.error")
+router = APIRouter(prefix="/api/sessions/current/photos/phone-links", tags=["downloads"])
+TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}")
+DELIVERY_HEADERS = {
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+}
+
+
+class DownloadLink(Base):
+    __tablename__ = "download_links"
+    __table_args__ = (
+        CheckConstraint("(original_id IS NULL) <> (filmstrip_id IS NULL)", name="download_link_one_asset"),
+    )
+
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    original_id: Mapped[UUID | None] = mapped_column(ForeignKey("original_photos.id", ondelete="CASCADE"))
+    filmstrip_id: Mapped[UUID | None] = mapped_column(ForeignKey("filmstrips.id", ondelete="CASCADE"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class LinkRequest(BaseModel):
+    asset_id: UUID
+    kind: ResultKind
+
+
+class PhoneLink(BaseModel):
+    url: str
+    qr_image: str
+    expires_at: datetime
+
+
+def qr_image(url: str) -> str:
+    with BytesIO() as output:
+        qrcode.make(url, image_factory=PilImage, box_size=8).save(output, format="PNG")
+        return "data:image/png;base64," + b64encode(output.getvalue()).decode("ascii")
+
+
+@router.post("", status_code=201, response_model=PhoneLink)
+def create_phone_link(body: LinkRequest, request: Request, booth_customer: str | None = Cookie(default=None)):
+    with request.app.state.db.begin() as db:
+        session = require_session(db, booth_customer, lock=True)
+        area = "processed" if body.kind == "filmstrip" else "originals"
+        asset = require_result(db, session.id, body.asset_id, body.kind)
+        stored_file(request, area, asset)
+        base = request.app.state.download_base
+        if base is None:
+            raise HTTPException(503, "Phone downloads are unavailable on this booth.")
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(minutes=request.app.state.settings.download_ttl_minutes)
+        token = issue_token()
+        url = f"{base}/d/{token}"
+        db.execute(delete(DownloadLink).where(DownloadLink.expires_at <= now))
+        db.add(DownloadLink(digest=token_digest(token), expires_at=expires_at,
+                            original_id=asset if body.kind == "original" else None,
+                            filmstrip_id=asset if body.kind == "filmstrip" else None))
+        return PhoneLink(url=url, qr_image=qr_image(url), expires_at=expires_at)
+
+
+def create_delivery_app(settings: Settings, sessions) -> FastAPI:
+    interface = settings.download_bind
+    if interface is None:
+        raise ValueError("A download listener needs a LAN interface")
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False)
+    app.state.settings = settings
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=[str(interface.ip)])
+
+    @app.middleware("http")
+    async def local_network(request: Request, call_next):
+        try:
+            allowed = request.client is not None and IPv4Address(request.client.host) in interface.network
+        except ValueError:
+            allowed = False
+        response = await call_next(request) if allowed else PlainTextResponse("Not found", status_code=404)
+        response.headers.update(DELIVERY_HEADERS)
+        return response
+
+    @app.exception_handler(SQLAlchemyError)
+    async def unavailable(_request: Request, exc: SQLAlchemyError):
+        log.warning("Phone download database operation failed (%s).", type(exc).__name__)
+        return PlainTextResponse("Downloads temporarily unavailable", status_code=503)
+
+    @app.api_route("/d/{token}", methods=["GET", "HEAD"])
+    def get_download(token: str, request: Request):
+        unavailable_link = "This download link is invalid or has expired."
+        if not TOKEN_PATTERN.fullmatch(token):
+            raise HTTPException(404, unavailable_link)
+        with sessions() as db:
+            link = db.get(DownloadLink, token_digest(token))
+            if link is None or link.expires_at <= datetime.now(UTC):
+                raise HTTPException(404, unavailable_link)
+            if link.original_id is not None:
+                asset = db.get(OriginalPhoto, link.original_id)
+                area, filename = "originals", "photo-booth.jpg"
+            else:
+                asset = db.get(Filmstrip, link.filmstrip_id)
+                area, filename = "processed", "classic-filmstrip.jpg"
+            owner = db.get(BoothSession, asset.session_id) if asset is not None else None
+            if owner is None or owner.state == State.CANCELED:
+                raise HTTPException(404, unavailable_link)
+            path = stored_file(request, area, asset.id)
+        return FileResponse(path, media_type="image/jpeg", filename=filename, headers=DELIVERY_HEADERS)
+
+    return app
+
+
+class DownloadServer(uvicorn.Server):
+    def capture_signals(self):
+        # The booth's main listener owns process signals and shuts this listener down.
+        return nullcontext()
+
+
+@asynccontextmanager
+async def delivery_listener(settings: Settings, sessions):
+    if settings.download_bind is None:
+        yield None
+        return
+    host, port = str(settings.download_bind.ip), settings.download_port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        try:
+            if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            listener.bind((host, port))
+            listener.listen()
+            listener.setblocking(False)
+        except OSError as exc:
+            log.warning("Could not bind the phone download listener to %s:%s (%s).", host, port, exc.strerror)
+            yield None
+            return
+        server = DownloadServer(uvicorn.Config(
+            create_delivery_app(settings, sessions), host=host, port=port, access_log=False,
+            log_config=None, lifespan="off", proxy_headers=False, ws="none", timeout_graceful_shutdown=3,
+        ))
+        task = asyncio.create_task(server.serve(sockets=[listener]))
+        try:
+            while not server.started and not task.done():
+                await asyncio.sleep(.01)
+            if server.started:
+                log.info("Phone downloads available at http://%s:%s.", host, port)
+            yield f"http://{host}:{port}" if server.started else None
+        finally:
+            server.should_exit = True
+            await task

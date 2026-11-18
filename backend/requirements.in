@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+sqlalchemy>=2.1,<2.2
+psycopg[binary]>=3.3,<4
+alembic
+pydantic-settings
+httpx
+pytest
+pillow>=13,<14
+qrcode>=8.2,<9
+comtypes>=1.5,<2; sys_platform == "win32"
