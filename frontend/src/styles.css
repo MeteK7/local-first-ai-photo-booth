@@ -58,19 +58,77 @@ p, dt { color: var(--muted); line-height: 1.6; }
 }
 .secondary { color: inherit; border-color: var(--control-border); background: var(--control); }
 .secondary:hover:enabled, a.secondary:hover { background: var(--control-hover); }
+@property --camera-light-progress {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
 .lens-panel {
   min-height: 390px; display: grid; place-items: center; border: 1px solid var(--line);
   border-radius: 18px; overflow: hidden;
+  --shadow-right: 0;
+  --shadow-bottom: 1;
+  --shadow-left: calc(1 - var(--shadow-right));
+  --shadow-top: calc(1 - var(--shadow-bottom));
+  --lower-left-shade: calc(var(--shadow-left) * var(--shadow-bottom));
+  --upper-right-shade: calc(var(--shadow-right) * var(--shadow-top));
+  --upper-left-shade: calc(var(--shadow-left) * var(--shadow-top));
+  --lower-right-shade: calc(var(--shadow-right) * var(--shadow-bottom));
   background:
-    linear-gradient(to top right, rgb(0 0 0 / 50%), rgb(0 0 0 / 46%) 30%,
-      rgb(0 0 0 / 23%) 54%, transparent 86%),
-    radial-gradient(ellipse at 75% 15%, #43536d 0%, #253247 50%, #1c2431 100%);
+    linear-gradient(to top right, rgb(0 0 0 / calc(50% * var(--lower-left-shade))),
+      rgb(0 0 0 / calc(46% * var(--lower-left-shade))) 30%,
+      rgb(0 0 0 / calc(23% * var(--lower-left-shade))) 54%, transparent 86%),
+    linear-gradient(to bottom left, rgb(0 0 0 / calc(50% * var(--upper-right-shade))),
+      rgb(0 0 0 / calc(46% * var(--upper-right-shade))) 30%,
+      rgb(0 0 0 / calc(23% * var(--upper-right-shade))) 54%, transparent 86%),
+    linear-gradient(to bottom right, rgb(0 0 0 / calc(50% * var(--upper-left-shade))),
+      rgb(0 0 0 / calc(46% * var(--upper-left-shade))) 30%,
+      rgb(0 0 0 / calc(23% * var(--upper-left-shade))) 54%, transparent 86%),
+    linear-gradient(to top left, rgb(0 0 0 / calc(50% * var(--lower-right-shade))),
+      rgb(0 0 0 / calc(46% * var(--lower-right-shade))) 30%,
+      rgb(0 0 0 / calc(23% * var(--lower-right-shade))) 54%, transparent 86%),
+    radial-gradient(ellipse at var(--camera-light-x, 75%) var(--camera-light-y, 15%),
+      var(--camera-highlight, #43536d) 0%, #253247 50%, #1c2431 100%);
 }
 .lens {
   width: 68%; aspect-ratio: 1; border-radius: 50%; border: 1px solid #778aa6;
   background: radial-gradient(circle, #1b283a 0 17%, #586b85 18% 19%, #172233 20% 40%,
     #526681 41% 42%, #2d3b51 43% 56%, #455b77 57% 58%, #4f6280 59% 65%, #243042 66% 69%);
   box-shadow: 0 22px 48px #1220349c, inset 0 0 36px #17223399;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lens-panel {
+    /* Two vertical oscillations per horizontal one trace a figure eight through the lens. */
+    --light-angle: calc(45deg - 1turn * var(--camera-light-progress));
+    --light-horizontal: sin(var(--light-angle));
+    --light-vertical: sin(2 * var(--light-angle));
+    --camera-light-x: calc(50% + 25% * var(--light-horizontal) / sin(45deg));
+    --camera-light-y: calc(50% - 35% * var(--light-vertical));
+    --shadow-right: calc(.5 - .5 * sin(90deg * clamp(-1, var(--light-horizontal) / sin(45deg), 1)));
+    --shadow-bottom: calc(.5 + .5 * var(--light-vertical));
+    --lens-reflection-strength: calc((1 - var(--light-horizontal) * var(--light-horizontal))
+      * (1 - var(--light-vertical) * var(--light-vertical)));
+    --camera-highlight: color-mix(in srgb, #43536d, #253247 calc(12% * var(--lens-reflection-strength)));
+    animation: camera-light-sweep 24s linear infinite;
+  }
+  .lens { position: relative; isolation: isolate; }
+  .lens::after {
+    /* The lens is centered and is 68% as wide as the housing. */
+    --lens-light-x: calc(50% + (var(--camera-light-x) - 50%) / .68);
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(ellipse 45% 36% at var(--lens-light-x) var(--camera-light-y),
+      var(--icon), transparent 72%);
+    mix-blend-mode: screen;
+    opacity: calc(.07 * var(--lens-reflection-strength));
+  }
+}
+@keyframes camera-light-sweep {
+  from { --camera-light-progress: 0; }
+  to { --camera-light-progress: 1; }
 }
 .panel { padding: clamp(22px, 5vw, 55px); background: var(--surface); border: 1px solid var(--line); border-radius: 18px; }
 .panel h1 { font-size: clamp(2.2rem, 6vw, 4rem); }
