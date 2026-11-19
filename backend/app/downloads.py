@@ -153,7 +153,7 @@ def create_delivery_app(settings: Settings, sessions) -> FastAPI:
             if owner is None or owner.state == State.CANCELED:
                 raise HTTPException(404, unavailable_link)
             path = stored_file(request, RESULT_AREAS[kind], asset_id)
-            filename = strip.filename if strip is not None else FILENAMES[kind]
+            filename = strip.filename(owner) if strip is not None else FILENAMES[kind]
         return FileResponse(path, media_type="image/jpeg", filename=filename, headers=DELIVERY_HEADERS)
 
     return app

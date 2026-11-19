@@ -322,12 +322,28 @@ def sample_jpeg():
         return output.getvalue()
 
 
-@pytest.mark.parametrize(("layout", "count", "size", "print_layout"), [
-    ("vertical", 2, (600, 1800), "Filmstrip"),
-    ("horizontal", 4, (1800, 600), "HorizontalStrip"),
-    ("grid", 6, (1800, 1200), "Photo"),
+def sculpture_jpeg(slot):
+    background = 185 if slot == 1 else 196
+    with BytesIO() as output, Image.new("RGB", (300, 200), (background,) * 3) as image:
+        if slot > 1:
+            center = (slot - 2) * 100 + 50
+            image.paste((53, 91, 134), (center - 18, 55, center + 18, 150))
+        image.save(output, format="JPEG")
+        return output.getvalue()
+
+
+@pytest.mark.parametrize(("experience", "options", "size", "print_layout", "pose_sequence"), [
+    ("signature-strip", {"layout": "vertical", "count": 2}, (600, 1800), "Filmstrip", False),
+    ("signature-strip", {"layout": "horizontal", "count": 4}, (1800, 600), "HorizontalStrip", False),
+    ("signature-strip", {"layout": "grid", "count": 6}, (1800, 1200), "Photo", False),
+    ("between-frames", {"count": 3, "guided": False}, (1800, 1200), "Photo", False),
+    ("motion-study", {"count": 5}, (1800, 1200), "Photo", False),
+    ("mini-scene", {"count": 4}, (1800, 1200), "Photo", False),
+    pytest.param("time-sculpture", {"count": 4}, (1800, 1200), "Photo", True, id="sculpture-fallback"),
+    pytest.param("time-sculpture", {"count": 4}, (1800, 1200), "Photo", False, id="sculpture-composite"),
 ])
-def test_signature_strip_resumes_and_delivers_the_same_result(settings, monkeypatch, layout, count, size, print_layout):
+def test_multi_photo_resumes_and_delivers_the_same_result(settings, monkeypatch, experience, options,
+                                                         size, print_layout, pose_sequence):
     app = create_app(settings)
     interface = IPv4Interface("192.168.42.7/24")
     lan_base = f"http://{interface.ip}:8001"
@@ -345,27 +361,44 @@ def test_signature_strip_resumes_and_delivers_the_same_result(settings, monkeypa
         TestClient(app, base_url=BASE) as other,
         TestClient(lan_app, base_url=lan_base, client=("192.168.42.100", 50000)) as phone,
     ):
-        selection = {"experience": "signature-strip", "version": 1, "count": count, "layout": layout}
+        selection = {"experience": experience, "version": 1, **options}
+        count = selection["count"]
         body = {"experience": "filmstrip", "multi_photo_plan": selection}
         for changes in ({"count": 1}, {"count": 7}, {"layout": "album"}, {"version": 2}):
             revised = {**selection, **changes}
             assert owner.post("/api/sessions", json={**body, "multi_photo_plan": revised}, headers=HEADERS).status_code == 422
         assert owner.post("/api/sessions", json={**body, "experience": "single"}, headers=HEADERS).status_code == 422
+        if experience == "time-sculpture":
+            catalog_path = "/api/sessions/multi-photo-studio"
+            assert "Time Sculpture" not in [mode["name"] for mode in owner.get(catalog_path).json()["creative"]]
+            assert owner.post("/api/sessions", json=body, headers=HEADERS).status_code == 409
+            settings.time_sculpture_enabled = True
+            assert "Time Sculpture" in [mode["name"] for mode in owner.get(catalog_path).json()["creative"]]
         session = owner.post("/api/sessions", json=body, headers=HEADERS).raise_for_status().json()
-        assert owner.get("/api/sessions/current").json()["multi_photo_plan"] == selection
+        current = owner.get("/api/sessions/current").json()
+        assert current["multi_photo_plan"] == selection
+        if experience == "between-frames":
+            assert current["studio_directions"]["prompts"] == []
+        elif experience == "motion-study":
+            prompts = current["studio_directions"]["prompts"]
+            assert len(prompts) == count and prompts[-1] == "Hold your final pose."
+        elif experience in {"mini-scene", "time-sculpture"}:
+            assert current["studio_directions"]["manual_advance"] is True
         resumed = owner.post("/api/sessions", headers=HEADERS).raise_for_status().json()
         assert (resumed["id"], resumed["multi_photo_plan"]) == (session["id"], selection)
         other.post("/api/sessions", json=body, headers=HEADERS).raise_for_status()
         assert owner.post(PHOTOS, json={"request_id": str(uuid4()), "slot": 2}, headers=HEADERS).status_code == 409
         assert owner.post(PHOTOS, json={"request_id": str(uuid4()), "slot": 1}, headers=HEADERS).status_code == 503
 
-        jpeg = sample_jpeg()
+        composite = experience == "time-sculpture" and not pose_sequence
+        width, height = (300, 200) if composite else (60, 40)
+        sources = [sculpture_jpeg(slot) for slot in range(1, count + 1)] if composite else [sample_jpeg()] * count
         ids, request_ids = [uuid4() for _ in range(count)], [uuid4() for _ in range(count)]
-        for slot, (photo, request_id) in enumerate(zip(ids, request_ids, strict=True), 1):
+        for slot, (photo, request_id, jpeg) in enumerate(zip(ids, request_ids, sources, strict=True), 1):
             save_original(settings.data_root, photo, jpeg)
             with app.state.db.begin() as db:
                 db.add(OriginalPhoto(id=photo, session_id=UUID(session["id"]), request_id=request_id, capture_slot=slot,
-                                     captured_at=datetime.now(UTC), byte_size=len(jpeg), width=60, height=40))
+                                     captured_at=datetime.now(UTC), byte_size=len(jpeg), width=width, height=height))
             if slot == 1:
                 progress = owner.get(f"{PHOTOS}/filmstrip").json()
                 assert progress == {"captured": 1, "required": count, "result": None}
@@ -380,12 +413,18 @@ def test_signature_strip_resumes_and_delivers_the_same_result(settings, monkeypa
         assert owner.post(PHOTOS, json={"request_id": str(uuid4())}, headers=HEADERS).status_code == 409
         result = owner.post(f"{PHOTOS}/filmstrip", headers=HEADERS).raise_for_status().json()
         assert (result["width"], result["height"]) == size
+        filename = experience
+        if pose_sequence:
+            assert "hard to distinguish" in result["fallback_reason"]
+            filename = "time-sculpture-poses"
+        else:
+            assert "fallback_reason" not in result
         assert owner.post(f"{PHOTOS}/filmstrip", headers=HEADERS).json() == result
         result_path = f"{PHOTOS}/filmstrip/{result['id']}"
         preview = owner.get(f"{result_path}/preview").raise_for_status().content
         download = owner.get(f"{result_path}/download").raise_for_status()
         assert download.content == preview
-        assert 'filename="signature-strip.jpg"' in download.headers["content-disposition"]
+        assert f'filename="{filename}.jpg"' in download.headers["content-disposition"]
         assert other.get(f"{result_path}/preview").status_code == 404
 
         app.state.download_base = lan_base
@@ -400,7 +439,8 @@ def test_signature_strip_resumes_and_delivers_the_same_result(settings, monkeypa
         owner.post(PRINT_JOBS, json=asset, headers=HEADERS).raise_for_status()
         printing.process_print_queue(settings, app.state.db)
         assert submitted == [(UUID(result["id"]), preview, print_layout)]
-        assert all(asset_path(settings.data_root, "originals", photo).read_bytes() == jpeg for photo in ids)
+        assert all(asset_path(settings.data_root, "originals", photo).read_bytes() == jpeg
+                   for photo, jpeg in zip(ids, sources, strict=True))
 
 
 def wait_for_result(kiosk, asset, treatment, state):

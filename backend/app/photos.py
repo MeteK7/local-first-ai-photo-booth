@@ -12,11 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, UUID4
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, select
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.creative_sequences import render_creative_sequence
 from app.db import Base
 from app.filmstrip import dimensions, render_filmstrip
 from app.media import asset_path, jpeg_dimensions, save_jpeg, save_original
-from app.multi_photo import LEGACY_STRIP_FILENAME, MAX_FRAMES, SIGNATURE_STRIP_FILENAME
-from app.sessions import Experience, active_session
+from app.multi_photo import MAX_FRAMES, SignatureStripPlan, TimeSculpturePlan, print_layout
+from app.sessions import BoothSession, Experience, active_session
+from app.time_sculpture import render_time_sculpture
 
 router = APIRouter(prefix="/api/sessions/current/photos", tags=["photos"])
 ResultKind = Literal["original", "filmstrip"]
@@ -54,10 +56,10 @@ class Filmstrip(Base):
     width: Mapped[int]
     height: Mapped[int]
     layout: Mapped[str | None] = mapped_column(String(12))
+    fallback_reason: Mapped[str | None]
 
-    @property
-    def filename(self) -> str:
-        return LEGACY_STRIP_FILENAME if self.layout is None else SIGNATURE_STRIP_FILENAME
+    def filename(self, session: BoothSession) -> str:
+        return "time-sculpture-poses.jpg" if self.fallback_reason else session.composition_filename
 
 
 class CaptureRequest(BaseModel):
@@ -82,6 +84,7 @@ class FilmstripView(BaseModel):
     byte_size: int
     width: int
     height: int
+    fallback_reason: str | None = Field(default=None, exclude_if=lambda reason: reason is None)
 
 
 class FilmstripProgress(BaseModel):
@@ -136,7 +139,7 @@ def latest(request: Request, booth_customer: str | None = Cookie(default=None)):
 def filmstrip_progress(request: Request, booth_customer: str | None = Cookie(default=None)):
     with request.app.state.db() as db:
         session = filmstrip_session(db, booth_customer)
-        count = session.signature_plan().count
+        count = session.capture_plan().count
         return FilmstripProgress(
             captured=len(strip_originals(db, session.id, count)), required=count,
             result=saved_filmstrip(db, session.id),
@@ -152,17 +155,27 @@ def compose_filmstrip(request: Request, booth_customer: str | None = Cookie(defa
         try:
             if existing is not None and asset_path(root, "processed", existing.id).is_file():
                 return existing
-            plan = session.signature_plan()
+            plan = session.capture_plan()
             originals = strip_originals(db, session.id, plan.count)
             if len(originals) != plan.count:
                 raise HTTPException(409, f"Take all {plan.count} photos before creating the composition.")
-            jpeg = render_filmstrip([asset_path(root, "originals", photo.id) for photo in originals], plan)
-            width, height = dimensions(plan.layout)
+            paths = [asset_path(root, "originals", photo.id) for photo in originals]
+            fallback = None
+            if isinstance(plan, TimeSculpturePlan):
+                sculpture = render_time_sculpture(paths)
+                jpeg, fallback = sculpture.jpeg, sculpture.fallback_reason
+            elif isinstance(plan, SignatureStripPlan):
+                jpeg = render_filmstrip(paths, plan)
+            else:
+                jpeg = render_creative_sequence(paths, plan)
+            layout = print_layout(plan)
+            width, height = dimensions(layout)
             result = existing or Filmstrip(
                 id=uuid4(), session_id=session.id, width=width, height=height,
-                created_at=datetime.now(UTC), layout=plan.layout if session.multi_photo_plan is not None else None,
+                created_at=datetime.now(UTC), layout=layout if session.multi_photo_plan is not None else None,
             )
             result.byte_size = len(jpeg)
+            result.fallback_reason = fallback
             db.add(result)
             db.flush()
             save_jpeg(root, "processed", result.id, jpeg)
@@ -190,7 +203,7 @@ def capture(body: CaptureRequest, request: Request, response: Response,
             return existing
         slot = None
         if multi_photo:
-            count = session.signature_plan().count
+            count = session.capture_plan().count
             originals = strip_originals(db, session.id, count)
             slot = body.slot if body.slot is not None else len(originals) + 1
             if slot <= len(originals):
@@ -243,25 +256,26 @@ def owned_photo(request: Request, token: str | None, photo_id: UUID) -> Path:
     return stored_file(request, "originals", photo_id)
 
 
-def owned_filmstrip(request: Request, token: str | None, strip_id: UUID) -> Filmstrip:
+def owned_filmstrip(request: Request, token: str | None, strip_id: UUID) -> tuple[Path, str]:
     with request.app.state.db() as db:
         session = filmstrip_session(db, token)
         result = saved_filmstrip(db, session.id)
-    if result is None or result.id != strip_id:
-        raise HTTPException(404, "Filmstrip not found.")
-    return result
+        if result is None or result.id != strip_id:
+            raise HTTPException(404, "Composition not found.")
+        filename = result.filename(session)
+    return stored_file(request, "processed", strip_id), filename
 
 
 @router.get("/filmstrip/{strip_id}/preview")
 def preview_filmstrip(strip_id: UUID, request: Request, booth_customer: str | None = Cookie(default=None)):
-    result = owned_filmstrip(request, booth_customer, strip_id)
-    return FileResponse(stored_file(request, "processed", result.id), media_type="image/jpeg")
+    path, _ = owned_filmstrip(request, booth_customer, strip_id)
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.get("/filmstrip/{strip_id}/download")
 def download_filmstrip(strip_id: UUID, request: Request, booth_customer: str | None = Cookie(default=None)):
-    result = owned_filmstrip(request, booth_customer, strip_id)
-    return FileResponse(stored_file(request, "processed", result.id), media_type="image/jpeg", filename=result.filename)
+    path, filename = owned_filmstrip(request, booth_customer, strip_id)
+    return FileResponse(path, media_type="image/jpeg", filename=filename)
 
 
 @router.get("/{photo_id}/preview")

@@ -98,4 +98,59 @@ describe('Session page', () => {
     http.verify();
     fixture.destroy();
   });
+
+  it('restores the cue for the next unsaved Motion Study frame', async () => {
+    TestBed.configureTestingModule({ providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()] });
+    const fixture = TestBed.createComponent(SessionPage);
+    const http = TestBed.inject(HttpTestingController);
+    fixture.detectChanges();
+    const date = '2026-11-19T00:00:00Z';
+    http.expectOne('/api/sessions/current').flush({
+      id: 'test-session', state: 'active', experience: 'filmstrip', started_at: date, expires_at: date, ended_at: null,
+      studio_directions: {
+        title: 'Motion Study', introduction: 'Hold each pose until the shutter.', first_countdown: 3, next_countdown: 2,
+        prompts: ['Set your starting pose.', 'Begin the move.', 'Reach the widest part of the move.', 'Hold your final pose.'],
+      },
+    });
+    await Promise.resolve();
+    http.expectOne('/api/sessions/current/photos/filmstrip').flush({ captured: 2, required: 4, result: null });
+    await Promise.resolve();
+    http.expectOne('/api/camera/status').flush({ state: 'unavailable', live_view: false, capture: false });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Multi-Photo Studio · Motion Study');
+    expect(fixture.nativeElement.textContent).toContain('Photo 3 of 4');
+    expect(fixture.nativeElement.textContent).toContain('Reach the widest part of the move.');
+    http.verify();
+    fixture.destroy();
+  });
+
+  it('labels and explains a saved Time Sculpture pose sequence', async () => {
+    TestBed.configureTestingModule({ providers: [provideRouter([]), provideHttpClient(), provideHttpClientTesting()] });
+    const fixture = TestBed.createComponent(SessionPage);
+    const http = TestBed.inject(HttpTestingController);
+    fixture.detectChanges();
+    const date = '2026-11-19T00:00:00Z';
+    http.expectOne('/api/sessions/current').flush({
+      id: 'test-session', state: 'active', experience: 'filmstrip', started_at: date, expires_at: date, ended_at: null,
+      multi_photo_plan: { experience: 'time-sculpture', version: 1, count: 4 },
+      studio_directions: { title: 'Time Sculpture', prompts: [], manual_advance: true },
+    });
+    await Promise.resolve();
+    http.expectOne('/api/sessions/current/photos/filmstrip').flush({
+      captured: 4, required: 4, result: {
+        id: 'poses', width: 1800, height: 1200, byte_size: 200, fallback_reason: 'A pose moved across a marked area.',
+      },
+    });
+    await Promise.resolve();
+    fixture.detectChanges();
+    http.expectOne(request => request.url.endsWith('/print-jobs') && request.method === 'GET').flush(null);
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('h2').textContent).toBe('Your pose sequence');
+    expect(fixture.nativeElement.textContent).toContain('A pose moved across a marked area.');
+    expect(fixture.nativeElement.querySelector('img').getAttribute('alt')).toBe('Your three source poses');
+    http.verify();
+    fixture.destroy();
+  });
 });

@@ -1,6 +1,6 @@
 import { Component, computed, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { Api, CameraStatus, message, Photo, PhotoFile, Session } from '../shared/api';
+import { Api, CameraStatus, Composition, message, Photo, Session } from '../shared/api';
 import { CreativeStudio } from './creative-studio';
 import { PhotoPrintAction } from './photo-print';
 import { PhoneDownloadAction } from './phone-download';
@@ -13,7 +13,7 @@ import { PhoneDownloadAction } from './phone-download';
       <header class="session-header">
         <h1 id="session-title">Your session</h1>
         @if (active()) {
-          <p class="session-mode">{{ isFilmstrip() ? 'Multi-Photo Studio · Signature Strip' : 'Single photo' }}</p>
+          <p class="session-mode">{{ isFilmstrip() ? 'Multi-Photo Studio · ' + studioTitle() : 'Single photo' }}</p>
         }
       </header>
       @if (loading()) { <p role="status">Checking your session…</p> }
@@ -21,16 +21,20 @@ import { PhoneDownloadAction } from './phone-download';
         @if (photo(); as result) {
           @if (isFilmstrip()) {
             <section class="session-result" aria-labelledby="session-result-title">
-              <h2 id="session-result-title">Your Signature Strip</h2>
+              <h2 id="session-result-title">Your {{ resultTitle() }}</h2>
+              @if (fallbackReason(); as reason) {
+                <p class="session-result-notice" role="status">{{ reason }} Your three poses are ready to download or print.</p>
+              }
               <div class="photo-stage">
-                <img [src]="api.photoUrl(result, 'preview', 'filmstrip')" alt="Your Signature Strip composition">
+                <img [src]="api.photoUrl(result, 'preview', 'filmstrip')"
+                     [alt]="fallbackReason() ? 'Your three source poses' : 'Your ' + studioTitle() + ' composition'">
               </div>
               <div class="actions result-actions" role="group" aria-label="Composition actions">
                 <a class="primary icon-action" [href]="api.photoUrl(result, 'download', 'filmstrip')" download>
                   <span class="action-icon download-icon" aria-hidden="true"></span>
                   <span>Download composition</span>
                 </a>
-                <app-phone-download [assetId]="result.id" kind="filmstrip" [disabled]="busy()" />
+                <app-phone-download [assetId]="result.id" kind="filmstrip" [label]="resultTitle()" [disabled]="busy()" />
                 <app-photo-print [assetId]="result.id" kind="filmstrip" [disabled]="busy()" />
               </div>
             </section>
@@ -44,7 +48,10 @@ import { PhoneDownloadAction } from './phone-download';
         } @else {
           <div class="session-capture">
             @if (isFilmstrip() && !filmstripComplete()) {
-              <p class="session-progress" role="status">Photo {{ shotsTaken() + 1 }} of {{ shotsRequired() }}</p>
+              <div class="session-progress-group" role="status" aria-atomic="true">
+                <p class="session-progress">Photo {{ shotsTaken() + 1 }} of {{ shotsRequired() }}</p>
+                @if (shotPrompt(); as prompt) { <p class="session-shot-prompt">{{ prompt }}</p> }
+              </div>
             }
             @if (filmstripComplete()) {
               <div class="camera-state" role="status">{{ busy() ? 'Creating your composition…' : 'All ' + shotsRequired() + ' photos are ready.' }}</div>
@@ -52,9 +59,18 @@ import { PhoneDownloadAction } from './phone-download';
             } @else {
               @if (frameUrl(); as frame) {
                 <div class="photo-stage">
-                  <img [src]="frame" alt="Live view from the booth camera">
+                  <div class="session-live-frame" [class.sculpture-framing]="isSculpture()">
+                    <img [src]="frame" alt="Live view from the booth camera">
+                    @if (isSculpture() && shotsTaken()) {
+                      <div class="sculpture-guides" aria-hidden="true">
+                        @for (position of ['Left', 'Center', 'Right']; track position) {
+                          <span [class.active-guide]="$index + 1 === shotsTaken()">{{ position }}</span>
+                        }
+                      </div>
+                    }
+                  </div>
                   @if (countdown(); as seconds) { <div class="countdown" role="status">{{ seconds }}</div> }
-                  @if (capturing()) { <div class="countdown progress" role="status">Saving your photo…</div> }
+                  @if (capturing()) { <div class="countdown progress" role="status">{{ transferMessage() }}</div> }
                 </div>
               } @else {
                 <div class="camera-state" role="status">{{ cameraCaption() }}</div>
@@ -63,10 +79,10 @@ import { PhoneDownloadAction } from './phone-download';
                       [disabled]="busy() || !frameUrl() || camera()?.state !== 'ready'"
                       (click)="takePhoto()">
                 <span class="shutter-disc" aria-hidden="true"><span class="action-icon shutter-icon"></span></span>
-                <span>{{ isFilmstrip() ? (shotsTaken() ? 'Continue capture' : 'Take ' + shotsRequired() + ' photos') : 'Take photo' }}</span>
+                <span>{{ captureLabel() }}</span>
               </button>
               @if (isFilmstrip() && !busy()) {
-                <p class="session-capture-note">The camera counts down before each photo.</p>
+                <p class="session-capture-note">{{ directions()?.introduction ?? 'The camera counts down before each photo.' }}</p>
               }
             }
           </div>
@@ -100,7 +116,7 @@ export class SessionPage implements OnInit, OnDestroy {
   readonly cameraCaption = signal('Checking camera availability…');
   readonly camera = signal<CameraStatus | null>(null);
   readonly frameUrl = signal<string | null>(null);
-  readonly photo = signal<PhotoFile | null>(null);
+  readonly photo = signal<Photo | Composition | null>(null);
   private readonly printAction = viewChild(PhotoPrintAction);
   private readonly phoneDownload = viewChild(PhoneDownloadAction);
   private readonly studio = viewChild(CreativeStudio);
@@ -113,6 +129,24 @@ export class SessionPage implements OnInit, OnDestroy {
   readonly experience = computed(() => this.active()?.experience ?? 'single');
   readonly isFilmstrip = computed(() => this.experience() === 'filmstrip');
   readonly filmstripComplete = computed(() => this.isFilmstrip() && this.shotsTaken() === this.shotsRequired());
+  readonly directions = computed(() => this.active()?.studio_directions);
+  readonly studioTitle = computed(() => this.directions()?.title ?? 'Signature Strip');
+  readonly isSculpture = computed(() => this.active()?.multi_photo_plan?.experience === 'time-sculpture');
+  readonly fallbackReason = computed(() => {
+    const result = this.photo();
+    return result && 'fallback_reason' in result ? result.fallback_reason : null;
+  });
+  readonly resultTitle = computed(() => this.fallbackReason() ? 'pose sequence' : this.studioTitle());
+  readonly captureLabel = computed(() => {
+    if (this.isSculpture()) return this.shotsTaken() ? 'Capture pose' : 'Capture empty scene';
+    if (this.directions()?.manual_advance) return this.shotsTaken() ? 'Take next photo' : 'Take first photo';
+    if (this.isFilmstrip()) return this.shotsTaken() ? 'Continue capture' : `Take ${this.shotsRequired()} photos`;
+    return 'Take photo';
+  });
+  readonly shotPrompt = computed(() => this.directions()?.prompts[this.shotsTaken()]);
+  readonly transferMessage = computed(() => this.shotsTaken() + 1 < this.shotsRequired()
+    ? this.directions()?.transfer_note ?? 'Saving your photo…'
+    : 'Saving your photo…');
   private stopped = false;
   private timer?: ReturnType<typeof setTimeout>;
   private cameraUpdate?: Promise<void>;
@@ -201,7 +235,10 @@ export class SessionPage implements OnInit, OnDestroy {
           this.photo.set(captured);
           return;
         }
-        if (!this.filmstripComplete()) await this.waitForLiveView();
+        if (!this.filmstripComplete()) {
+          if (this.directions()?.manual_advance) return;
+          await this.waitForLiveView();
+        }
       }
       await this.renderFilmstrip();
     } catch (error) {
@@ -214,7 +251,9 @@ export class SessionPage implements OnInit, OnDestroy {
   }
 
   private async captureOne(): Promise<Photo | undefined> {
-    for (let seconds = 3; seconds > 0; seconds--) {
+    const directions = this.directions();
+    const duration = (this.shotsTaken() ? directions?.next_countdown : directions?.first_countdown) ?? 3;
+    for (let seconds = duration; seconds > 0; seconds--) {
       this.countdown.set(seconds);
       await new Promise(resolve => setTimeout(resolve, 1000));
       if (this.stopped) return;

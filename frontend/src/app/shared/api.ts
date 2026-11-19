@@ -6,6 +6,8 @@ export interface Session {
   id: string;
   state: 'active' | 'completed' | 'canceled';
   experience: Experience;
+  multi_photo_plan?: CapturePlan | null;
+  studio_directions?: CaptureDirections | null;
   started_at: string;
   expires_at: string;
   ended_at: string | null;
@@ -22,16 +24,55 @@ export interface SignatureStripPlan {
   layout: StripLayout;
 }
 
+export interface BetweenFramesPlan {
+  experience: 'between-frames';
+  version: 1;
+  count: number;
+  guided: boolean;
+}
+
+export interface MotionStudyPlan {
+  experience: 'motion-study';
+  version: 1;
+  count: number;
+}
+
+export interface StoryPlan {
+  experience: 'mini-scene' | 'time-sculpture';
+  version: 1;
+  count: 4;
+}
+
+export type CreativePlan = BetweenFramesPlan | MotionStudyPlan | StoryPlan;
+export type CapturePlan = SignatureStripPlan | CreativePlan;
+
+export interface CaptureDirections {
+  title: string;
+  introduction: string;
+  prompts: string[];
+  first_countdown: number;
+  next_countdown: number;
+  transfer_note: string | null;
+  manual_advance?: boolean;
+}
+
+export interface CompositionGeometry {
+  size: string;
+  width: number;
+  height: number;
+  frames: Record<number, [number, number, number, number][]>;
+}
+
 export interface MultiPhotoCatalog {
   default_plan: SignatureStripPlan;
   counts: number[];
-  layouts: {
-    id: StripLayout;
+  layouts: (CompositionGeometry & { id: StripLayout; name: string })[];
+  creative?: {
+    default_plan: CreativePlan;
     name: string;
-    size: string;
-    width: number;
-    height: number;
-    frames: Record<number, [number, number, number, number][]>;
+    description: string;
+    counts: number[];
+    composition: CompositionGeometry;
   }[];
 }
 
@@ -61,6 +102,10 @@ export interface PhotoFile {
 
 export interface Photo extends PhotoFile {
   captured_at: string;
+}
+
+export interface Composition extends PhotoFile {
+  fallback_reason?: string;
 }
 
 export interface PhoneLink {
@@ -94,7 +139,7 @@ export interface CreativeTreatment {
 interface FilmstripProgress {
   captured: number;
   required: number;
-  result: PhotoFile | null;
+  result: Composition | null;
 }
 
 const photos = '/api/sessions/current/photos';
@@ -110,7 +155,7 @@ export function message(error: unknown, fallback: string): string {
 export class Api {
   private readonly http = inject(HttpClient);
 
-  start(experience: Experience, multiPhotoPlan?: SignatureStripPlan) {
+  start(experience: Experience, multiPhotoPlan?: CapturePlan) {
     return firstValueFrom(this.http.post<Session>('/api/sessions', {
       experience, multi_photo_plan: multiPhotoPlan,
     }));
@@ -129,7 +174,7 @@ export class Api {
     return firstValueFrom(this.http.post<Photo>(photos, { request_id: requestId, slot }));
   }
   filmstrip() { return firstValueFrom(this.http.get<FilmstripProgress>(`${photos}/filmstrip`)); }
-  composeFilmstrip() { return firstValueFrom(this.http.post<PhotoFile>(`${photos}/filmstrip`, {})); }
+  composeFilmstrip() { return firstValueFrom(this.http.post<Composition>(`${photos}/filmstrip`, {})); }
   createPhoneLink(assetId: string, kind: PhotoResultKind) {
     return firstValueFrom(this.http.post<PhoneLink>(`${photos}/phone-links`, {
       asset_id: assetId, kind,

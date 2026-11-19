@@ -3,8 +3,9 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
+from app.creative_sequences import creative_boxes, render_creative_sequence
 from app.filmstrip import frame_boxes, render_filmstrip
-from app.multi_photo import SignatureStripPlan, StripLayout
+from app.multi_photo import BetweenFramesPlan, MiniScenePlan, MotionStudyPlan, SignatureStripPlan, StripLayout, capture_directions
 
 
 @pytest.fixture
@@ -57,3 +58,34 @@ def test_portrait_exif_rotation_and_safe_crop_keep_both_edges(tmp_path):
         gutter = strip.getpixel((x + 20, y + height // 2))
         assert min(gutter) > 210
     assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("plan", [
+    BetweenFramesPlan(experience="between-frames", count=2),
+    BetweenFramesPlan(experience="between-frames", count=3),
+    MiniScenePlan(experience="mini-scene"),
+    *[MotionStudyPlan(experience="motion-study", count=count) for count in (4, 5, 6)],
+])
+def test_creative_sequence_print_geometry_order_and_direction_count(originals, plan):
+    paths, fields = originals
+    boxes = creative_boxes(plan)
+    prompts = capture_directions(plan).prompts
+    assert len(boxes) == len(prompts) == plan.count
+    with Image.open(BytesIO(render_creative_sequence(paths[:plan.count], plan))) as result:
+        assert result.size == (1800, 1200)
+        assert result.info["dpi"] == (300, 300)
+        for (x, y, width, height), color in zip(boxes, fields[:plan.count], strict=True):
+            assert 0 < x < x + width < result.width and 0 < y < y + height < result.height
+            center = result.getpixel((x + width // 2, y + height // 2))
+            assert max(abs(a - b) for a, b in zip(center, color, strict=True)) < 4
+    if isinstance(plan, MotionStudyPlan):
+        assert boxes[-1][2] > 2 * boxes[0][2]
+        assert len({y for _, y, _, _ in boxes}) == plan.count
+        assert capture_directions(plan).next_countdown == 2
+    elif isinstance(plan, BetweenFramesPlan):
+        assert len({y for _, y, _, _ in boxes}) == 1
+        assert capture_directions(plan.model_copy(update={"guided": False})).prompts == ()
+    else:
+        assert boxes[1][2] > max(boxes[index][2] for index in (0, 2, 3))
+        assert capture_directions(plan).manual_advance
+        assert [prompt.split(" · ")[0] for prompt in prompts] == ["Setup", "Action", "Reaction", "Ending"]

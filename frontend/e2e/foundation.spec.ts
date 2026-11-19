@@ -53,3 +53,45 @@ test('configures a six-shot Signature Strip and resumes the selected plan', asyn
   await page.getByRole('button', { name: 'Cancel session' }).click();
   await expect(page.getByRole('link', { name: 'Multi-Photo Studio' })).toBeVisible();
 });
+
+test('chooses a Creative Collection composition and restores its capture directions', async ({ page }) => {
+  await page.goto('/multi-photo-studio');
+  const collection = page.getByRole('group', { name: 'Creative Collection' });
+  const choices = page.getByRole('group', { name: 'Number of photos' });
+  await collection.getByRole('button', { name: 'Between Frames' }).click();
+  await expect(page.locator('.multi-photo-example .multi-photo-cell')).toHaveCount(2);
+  await choices.getByRole('button', { name: '3', exact: true }).click();
+  await expect(page.locator('.multi-photo-example .multi-photo-cell')).toHaveCount(3);
+  await page.getByLabel('Show pose prompts').uncheck();
+  await page.getByRole('button', { name: 'Continue to camera' }).click();
+  await expect(page.getByText('Photo 1 of 3', { exact: true })).toBeVisible();
+  await expect(page.getByText('Hold a calm expression.', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Cancel session' }).click();
+  await page.getByRole('link', { name: 'Multi-Photo Studio' }).click();
+
+  await collection.getByRole('button', { name: 'Motion Study' }).click();
+  await expect(choices.getByRole('button')).toHaveText(['4', '5', '6']);
+  await choices.getByRole('button', { name: '5', exact: true }).click();
+  await expect(page.locator('.multi-photo-example .multi-photo-cell')).toHaveCount(5);
+  await page.getByRole('button', { name: 'Continue to camera' }).click();
+  await expect(page.getByText('Set your starting pose.', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Photo 1 of 5', { exact: true })).toBeVisible();
+  await expect(page.getByText('Set your starting pose.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel session' }).click();
+});
+
+test('opens Mini Scene at the first story beat and keeps a fixed-camera setup opt-in', async ({ page }) => {
+  await page.goto('/multi-photo-studio');
+  const collection = page.getByRole('group', { name: 'Creative Collection' });
+  await expect(collection.getByRole('button', { name: 'Time Sculpture' })).toHaveCount(0);
+  await collection.getByRole('button', { name: 'Mini Scene' }).click();
+  await expect(page.locator('.multi-photo-example .multi-photo-cell')).toHaveCount(4);
+  await page.getByRole('button', { name: 'Continue to camera' }).click();
+  await expect(page.getByText('Setup · Show us who you are.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Take first photo' })).toBeDisabled();
+  await page.reload();
+  await expect(page.getByText('Photo 1 of 4', { exact: true })).toBeVisible();
+  await expect(page.getByText('Setup · Show us who you are.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel session' }).click();
+});

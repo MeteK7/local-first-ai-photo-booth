@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     data_root: Path = ROOT / "data"
     frontend_dir: Path = ROOT / "frontend/dist/photo-booth/browser"
     camera_enabled: bool = True
+    time_sculpture_enabled: bool = False
     download_bind: IPv4Interface | None = None
     download_port: int = Field(default=8001, ge=1, le=65535)
     download_ttl_minutes: PositiveInt = 10

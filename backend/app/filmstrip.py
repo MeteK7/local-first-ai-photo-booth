@@ -48,22 +48,31 @@ def frame_boxes(plan: SignatureStripPlan) -> list[FrameBox]:
     return [(STRIP_MARGIN, start, breadth, length) for start, length in positions]
 
 
+def paste_frame(canvas: Image.Image, path: Path, box: FrameBox, *,
+                padding: str = "#ececf1", legacy_crop: bool = False) -> None:
+    x, y, width, height = box
+    with Image.open(path, formats=("JPEG",)) as image:
+        ImageOps.exif_transpose(image, in_place=True)
+        with image.convert("RGB") as rgb:
+            ratio = (rgb.width / rgb.height) / (width / height)
+            if not legacy_crop and min(ratio, 1 / ratio) < 2 / 3:
+                with ImageOps.pad(rgb, (width, height), Image.Resampling.LANCZOS, color=padding) as frame:
+                    canvas.paste(frame, (x, y))
+            else:
+                with ImageOps.fit(rgb, (width, height), Image.Resampling.LANCZOS) as frame:
+                    canvas.paste(frame, (x, y))
+
+
+def print_jpeg(canvas: Image.Image) -> bytes:
+    with BytesIO() as output:
+        canvas.save(output, format="JPEG", quality=94, subsampling=0, dpi=(300, 300))
+        return output.getvalue()
+
+
 def render_filmstrip(originals: Sequence[Path], plan: SignatureStripPlan = DEFAULT_PLAN) -> bytes:
     if len(originals) != plan.count:
         raise ValueError("The number of originals must match the capture plan")
-    with BytesIO() as output, Image.new("RGB", dimensions(plan.layout), "white") as canvas:
-        for path, (x, y, width, height) in zip(originals, frame_boxes(plan), strict=True):
-            with Image.open(path, formats=("JPEG",)) as image:
-                ImageOps.exif_transpose(image, in_place=True)
-                with image.convert("RGB") as rgb:
-                    ratio = (rgb.width / rgb.height) / (width / height)
-                    # Preserve the familiar square crop. For new proportions, keep the full photo
-                    # when filling the frame would remove more than a third of the original.
-                    if plan != DEFAULT_PLAN and min(ratio, 1 / ratio) < 2 / 3:
-                        with ImageOps.pad(rgb, (width, height), Image.Resampling.LANCZOS, color="#ececf1") as frame:
-                            canvas.paste(frame, (x, y))
-                    else:
-                        with ImageOps.fit(rgb, (width, height), Image.Resampling.LANCZOS) as frame:
-                            canvas.paste(frame, (x, y))
-        canvas.save(output, format="JPEG", quality=94, subsampling=0, dpi=(300, 300))
-        return output.getvalue()
+    with Image.new("RGB", dimensions(plan.layout), "white") as canvas:
+        for path, box in zip(originals, frame_boxes(plan), strict=True):
+            paste_frame(canvas, path, box, legacy_crop=plan == DEFAULT_PLAN)
+        return print_jpeg(canvas)

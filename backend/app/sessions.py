@@ -3,19 +3,24 @@ from enum import StrEnum
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 from sqlalchemy import CheckConstraint, DateTime, String, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.creative_sequences import creative_boxes
 from app.db import Base
 from app.filmstrip import dimensions, frame_boxes
-from app.multi_photo import DEFAULT_PLAN, MAX_FRAMES, MIN_FRAMES, SignatureStripPlan, StripLayout
+from app.multi_photo import (
+    DEFAULT_PLAN, LEGACY_STRIP_FILENAME, MAX_FRAMES, MIN_FRAMES, BetweenFramesPlan, CaptureDirections, CapturePlan,
+    MiniScenePlan, MotionStudyPlan, SignatureStripPlan, StripLayout, TimeSculpturePlan, capture_directions,
+)
 from app.security import issue_token, token_digest
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 COOKIE = "booth_customer"
 LIFETIME = timedelta(minutes=30)
+PLAN_ADAPTER = TypeAdapter(CapturePlan)
 
 
 class State(StrEnum):
@@ -47,8 +52,16 @@ class BoothSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    def signature_plan(self) -> SignatureStripPlan:
-        return DEFAULT_PLAN if self.multi_photo_plan is None else SignatureStripPlan.model_validate(self.multi_photo_plan)
+    def capture_plan(self) -> CapturePlan:
+        return DEFAULT_PLAN if self.multi_photo_plan is None else PLAN_ADAPTER.validate_python(self.multi_photo_plan)
+
+    @property
+    def studio_directions(self) -> CaptureDirections | None:
+        return capture_directions(self.capture_plan()) if self.experience == Experience.FILMSTRIP else None
+
+    @property
+    def composition_filename(self) -> str:
+        return LEGACY_STRIP_FILENAME if self.multi_photo_plan is None else f"{self.capture_plan().experience}.jpg"
 
     def finish(self, target: State, now: datetime) -> None:
         if self.state != State.ACTIVE or target not in (State.COMPLETED, State.CANCELED):
@@ -63,7 +76,8 @@ class SessionView(BaseModel):
     id: UUID
     state: State
     experience: Experience
-    multi_photo_plan: SignatureStripPlan | None
+    multi_photo_plan: CapturePlan | None
+    studio_directions: CaptureDirections | None
     started_at: datetime
     expires_at: datetime
     ended_at: datetime | None
@@ -75,7 +89,7 @@ class FinishRequest(BaseModel):
 
 class StartRequest(BaseModel):
     experience: Experience = Experience.SINGLE
-    multi_photo_plan: SignatureStripPlan | None = None
+    multi_photo_plan: CapturePlan | None = None
 
     @model_validator(mode="after")
     def validate_experience(self):
@@ -102,7 +116,16 @@ def current(request: Request, booth_customer: str | None = Cookie(default=None))
 
 
 @router.get("/multi-photo-studio")
-def multi_photo_studio():
+def multi_photo_studio(request: Request):
+    grid_width, grid_height = dimensions(StripLayout.GRID)
+    creative = [
+        (BetweenFramesPlan(experience="between-frames"), "Pair contrasting expressions or poses in a diptych or triptych.", (2, 3)),
+        (MotionStudyPlan(experience="motion-study"), "Follow a series of pose cues and see one movement unfold across the page.", (4, 5, 6)),
+        (MiniScenePlan(experience="mini-scene"), "Tell a four-photo story with a setup, action, reaction, and ending.", (4,)),
+    ]
+    if request.app.state.settings.time_sculpture_enabled:
+        creative.append((TimeSculpturePlan(experience="time-sculpture"),
+                         "Use a fixed camera and clear background to put three poses in one scene.", (4,)))
     return {
         "default_plan": DEFAULT_PLAN,
         "counts": list(range(MIN_FRAMES, MAX_FRAMES + 1)),
@@ -124,6 +147,19 @@ def multi_photo_studio():
                 (StripLayout.GRID, "Grid", "6 × 4 in"),
             )
         ],
+        "creative": [
+            {
+                "default_plan": plan,
+                "name": capture_directions(plan).title,
+                "description": description,
+                "counts": counts,
+                "composition": {
+                    "size": "6 × 4 in", "width": grid_width, "height": grid_height,
+                    "frames": {count: creative_boxes(plan.model_copy(update={"count": count})) for count in counts},
+                },
+            }
+            for plan, description, counts in creative
+        ],
     }
 
 
@@ -138,6 +174,8 @@ def start(request: Request, response: Response, body: StartRequest | None = None
             return existing
         token = issue_token()
         plan = body.multi_photo_plan if body else None
+        if isinstance(plan, TimeSculpturePlan) and not request.app.state.settings.time_sculpture_enabled:
+            raise HTTPException(409, "Time Sculpture needs a configured, fixed-camera setup.")
         session = BoothSession(
             access_digest=token_digest(token), state=State.ACTIVE, started_at=now,
             expires_at=now + LIFETIME,
