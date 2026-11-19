@@ -171,6 +171,15 @@ p, dt { color: var(--muted); line-height: 1.6; }
 .multi-photo-example h3 { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; }
 .multi-photo-example h3 span { color: var(--muted); font-size: .8rem; font-weight: 500; }
 .multi-photo-example .multi-photo-mat { height: auto; padding-block: 10px; min-height: 110px; }
+.motion-study-print-sample {
+  display: block; width: min(100%, clamp(180px, 34vh, 288px)); height: auto; aspect-ratio: 3 / 2;
+  box-shadow: 0 0 0 1px var(--control-border);
+}
+.motion-study-controls .multi-photo-layouts button { padding-inline: 9px; }
+.motion-study-fixed-count { margin: 0; min-height: 49px; display: flex; align-items: center; }
+@media (min-width: 681px) {
+  .motion-study-controls { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 16px; }
+}
 .multi-photo-example .multi-photo-sheet { width: min(80%, 185px); }
 .multi-photo-sheet.between-frames { background: #f4f3f0; }
 .multi-photo-sheet:is(.motion-study, .mini-scene, .time-sculpture) { background: #172233; box-shadow: 0 0 0 1px var(--control-border); }

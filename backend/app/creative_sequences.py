@@ -6,7 +6,10 @@ from typing import Sequence
 from PIL import Image, ImageDraw, ImageFont
 
 from app.filmstrip import FrameBox, GRID_HEIGHT, GRID_WIDTH, cells, paste_frame, print_jpeg
-from app.multi_photo import MINI_SCENE_BEATS, BetweenFramesPlan, CreativePlan, MiniScenePlan, TimeSculpturePlan, capture_directions
+from app.motion_study import motion_panels, render_motion_study
+from app.multi_photo import (
+    MINI_SCENE_BEATS, BetweenFramesPlan, CreativePlan, MiniScenePlan, MotionStudyPlan, TimeSculpturePlan, capture_directions,
+)
 
 
 def creative_boxes(plan: CreativePlan) -> list[FrameBox]:
@@ -16,6 +19,8 @@ def creative_boxes(plan: CreativePlan) -> list[FrameBox]:
         return [(86, 232, 484, 494), (606, 232, 1108, 494), (86, 818, 720, 310), (842, 818, 872, 310)]
     if isinstance(plan, TimeSculpturePlan):
         return [(index * 600, 0, 600, 1200) for index in range(3)]
+    if isinstance(plan, MotionStudyPlan) and plan.layout is not None:
+        return [panel.box() for panel in motion_panels(plan.layout, plan.count)]
 
     # Walking left to right, successive frames alternate in height along a rising path.
     lead = [
@@ -28,6 +33,8 @@ def creative_boxes(plan: CreativePlan) -> list[FrameBox]:
 def render_creative_sequence(originals: Sequence[Path], plan: CreativePlan) -> bytes:
     if isinstance(plan, TimeSculpturePlan) or len(originals) != plan.count:
         raise ValueError("The number of originals must match the capture plan")
+    if isinstance(plan, MotionStudyPlan) and plan.layout is not None:
+        return render_motion_study(originals, plan.layout)
 
     boxes = creative_boxes(plan)
     between = isinstance(plan, BetweenFramesPlan)

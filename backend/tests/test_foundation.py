@@ -338,6 +338,9 @@ def sculpture_jpeg(slot):
     ("signature-strip", {"layout": "grid", "count": 6}, (1800, 1200), "Photo", False),
     ("between-frames", {"count": 3, "guided": False}, (1800, 1200), "Photo", False),
     ("motion-study", {"count": 5}, (1800, 1200), "Photo", False),
+    ("motion-study", {"count": 4, "layout": "contact-stack"}, (1800, 1200), "Photo", False),
+    ("motion-study", {"count": 4, "layout": "match-cut"}, (1800, 1200), "Photo", False),
+    ("motion-study", {"count": 6, "layout": "ascending-cut"}, (1800, 1200), "Photo", False),
     ("mini-scene", {"count": 4}, (1800, 1200), "Photo", False),
     pytest.param("time-sculpture", {"count": 4}, (1800, 1200), "Photo", True, id="sculpture-fallback"),
     pytest.param("time-sculpture", {"count": 4}, (1800, 1200), "Photo", False, id="sculpture-composite"),
@@ -368,6 +371,17 @@ def test_multi_photo_resumes_and_delivers_the_same_result(settings, monkeypatch,
             revised = {**selection, **changes}
             assert owner.post("/api/sessions", json={**body, "multi_photo_plan": revised}, headers=HEADERS).status_code == 422
         assert owner.post("/api/sessions", json={**body, "experience": "single"}, headers=HEADERS).status_code == 422
+        if experience == "motion-study" and "layout" in options:
+            catalog = owner.get("/api/sessions/multi-photo-studio").raise_for_status().json()
+            layout = next(choice for choice in catalog["motion_layouts"] if choice["id"] == options["layout"])
+            preview = owner.get(layout["previews"][str(count)]).raise_for_status()
+            assert preview.headers["content-type"] == "image/jpeg"
+            if count == 4:
+                assert layout["counts"] == [4]
+                bad_plan = {**selection, "count": 5}
+                assert owner.post("/api/sessions", json={**body, "multi_photo_plan": bad_plan}, headers=HEADERS).status_code == 422
+            else:
+                assert layout["counts"] == [4, 5, 6]
         if experience == "time-sculpture":
             catalog_path = "/api/sessions/multi-photo-studio"
             assert "Time Sculpture" not in [mode["name"] for mode in owner.get(catalog_path).json()["creative"]]

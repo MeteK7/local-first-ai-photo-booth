@@ -31,6 +31,12 @@
 - Phase 2 passed 44 Python tests, six Angular tests, three Edge regressions, and two physical D5600 browser tests. The physical tests completed a three-shot Between Frames session and a four-shot Motion Study session. They checked the on-screen cues, ordered shutter requests, and byte equality across the preview, booth download, and LAN QR download. The database integration tests checked the 6 × 4 print profile and verified the same JPEG reaches the print adapter.
 - To repeat the two physical runs, set `PHOTOBOOTH_HARDWARE_TESTS=1` and run `npm --prefix .\frontend run e2e -- d5600.spec.ts --grep 'delivers (Between Frames|Motion Study)' --workers=1` against the running booth. Set `PHOTOBOOTH_HARDWARE_QR_TESTS=1` to check the configured LAN download listener as well. The two runs fire seven shutter releases and preserve the originals in the booth's storage.
 
+## Motion Study editorial layouts
+
+- **Contact Stack** layers four tilted, irregularly cropped frames. **Match Cut** crops four slanted panels with parallel edges and equal gaps. **Ascending Cut** arranges four to six photos on a shared baseline with rising frame heights and widths.
+- The layout and frame count are saved on the session. Ascending Cut is the default for new selections. Earlier Motion Study plans without a layout continue to use their original composition. The plan is stored in the existing JSON field.
+- The kiosk renders an offline sample with the production compositor. Both use the same layering, crops, print ratio, and geometry. Final prints use the captured originals at 1800 × 1200 pixels and 300 dpi.
+
 ## Mini Scene and Time Sculpture
 
 - **Mini Scene** guides the customer through setup, action, reaction, and ending. Each countdown starts on demand so the customer can prepare the next beat. The four-panel storyboard gives the action the largest frame.

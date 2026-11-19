@@ -1,6 +1,6 @@
 import { Component, computed, inject, input, OnInit, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { Api, CapturePlan, CompositionGeometry, message, MultiPhotoCatalog } from '../shared/api';
+import { Api, CapturePlan, CompositionGeometry, message, MotionLayoutChoice, MultiPhotoCatalog } from '../shared/api';
 
 @Component({
   selector: 'app-composition-preview',
@@ -46,19 +46,37 @@ class CompositionPreview {
               }
             </div>
           </div>
-          <p class="multi-photo-description">{{ creative()?.description ?? 'Choose how many photos to take and how to arrange them.' }}</p>
-          @let counts = creative()?.counts ?? options.counts;
-          @if (counts.length > 1) {
-            <div class="multi-photo-field">
-              <h3 id="photo-count-label">Number of photos</h3>
-              <div class="multi-photo-counts" role="group" aria-labelledby="photo-count-label">
-                @for (count of counts; track count) {
-                  <button type="button" class="secondary" [aria-pressed]="count === selected.count" [disabled]="starting()"
-                          (click)="chooseCount(count)">{{ count }}</button>
-                }
+          <p class="multi-photo-description">{{ motionLayout()?.description ?? creative()?.description ?? 'Choose how many photos to take and how to arrange them.' }}</p>
+          @let counts = motionLayout()?.counts ?? creative()?.counts ?? options.counts;
+          <div [class.motion-study-controls]="selected.experience === 'motion-study' && options.motion_layouts?.length">
+            @if (selected.experience === 'motion-study' && options.motion_layouts?.length) {
+              <div class="multi-photo-field">
+                <h3 id="motion-layout-label">Layout</h3>
+                <div class="multi-photo-layouts" role="group" aria-labelledby="motion-layout-label">
+                  @for (layout of options.motion_layouts; track layout.id) {
+                    <button type="button" class="secondary" [aria-pressed]="selected.layout === layout.id"
+                            [disabled]="starting()" (click)="chooseMotionLayout(layout)">{{ layout.name }}</button>
+                  }
+                </div>
               </div>
-            </div>
-          }
+            }
+            @if (counts.length > 1) {
+              <div class="multi-photo-field">
+                <h3 id="photo-count-label">Number of photos</h3>
+                <div class="multi-photo-counts" role="group" aria-labelledby="photo-count-label">
+                  @for (count of counts; track count) {
+                    <button type="button" class="secondary" [aria-pressed]="count === selected.count" [disabled]="starting()"
+                            (click)="chooseCount(count)">{{ count }}</button>
+                  }
+                </div>
+              </div>
+            } @else if (motionLayout()) {
+              <div class="multi-photo-field">
+                <h3>Number of photos</h3>
+                <p class="motion-study-fixed-count">{{ selected.count }}</p>
+              </div>
+            }
+          </div>
           @if (selected.experience === 'signature-strip') {
             <div class="multi-photo-field">
               <h3 id="photo-layout-label">Layout</h3>
@@ -82,8 +100,18 @@ class CompositionPreview {
               </label>
             }
             <div class="multi-photo-field multi-photo-example">
-              <h3>Composition preview <span>{{ selected.experience === 'time-sculpture' ? '3 poses + 1 empty frame · ' : '' }}{{ option.composition.size }}</span></h3>
-              <app-composition-preview [geometry]="option.composition" [count]="selected.count" [shape]="selected.experience" />
+              <h3>Composition preview <span>
+                @if (selected.experience === 'time-sculpture') { 3 poses + 1 empty frame · }
+                {{ option.composition.size }}
+              </span></h3>
+              @if (motionLayout(); as layout) {
+                <div class="multi-photo-mat">
+                  <img class="motion-study-print-sample" [src]="layout.previews[selected.count]" width="720" height="480"
+                       [alt]="layout.name + ' sample print with ' + selected.count + ' photos'">
+                </div>
+              } @else {
+                <app-composition-preview [geometry]="option.composition" [count]="selected.count" [shape]="selected.experience" />
+              }
             </div>
           }
           <div class="actions multi-photo-actions">
@@ -111,6 +139,12 @@ export class MultiPhotoStudio implements OnInit {
   readonly catalog = signal<MultiPhotoCatalog | null>(null);
   readonly plan = signal<CapturePlan | null>(null);
   readonly creative = computed(() => this.catalog()?.creative?.find(option => option.default_plan.experience === this.plan()?.experience));
+  readonly motionLayout = computed(() => {
+    const selected = this.plan();
+    return selected?.experience === 'motion-study'
+      ? this.catalog()?.motion_layouts?.find(layout => layout.id === selected.layout)
+      : undefined;
+  });
   readonly loading = signal(true);
   readonly starting = signal(false);
   readonly error = signal('');
@@ -125,6 +159,12 @@ export class MultiPhotoStudio implements OnInit {
     const selected = this.plan();
     if (selected && (selected.experience === 'signature-strip' || selected.experience === 'between-frames' ||
                     selected.experience === 'motion-study')) this.plan.set({ ...selected, count });
+  }
+
+  chooseMotionLayout(layout: MotionLayoutChoice): void {
+    const selected = this.plan();
+    if (selected?.experience !== 'motion-study') return;
+    this.plan.set({ ...selected, layout: layout.id, count: layout.counts.includes(selected.count) ? selected.count : layout.counts[0] });
   }
 
   async load(): Promise<void> {

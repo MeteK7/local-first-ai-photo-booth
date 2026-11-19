@@ -35,6 +35,17 @@ export interface MotionStudyPlan {
   experience: 'motion-study';
   version: 1;
   count: number;
+  layout?: MotionStudyLayout;
+}
+
+export type MotionStudyLayout = 'contact-stack' | 'match-cut' | 'ascending-cut';
+
+export interface MotionLayoutChoice {
+  id: MotionStudyLayout;
+  name: string;
+  description: string;
+  counts: number[];
+  previews: Record<number, string>;
 }
 
 export interface StoryPlan {
@@ -67,6 +78,7 @@ export interface MultiPhotoCatalog {
   default_plan: SignatureStripPlan;
   counts: number[];
   layouts: (CompositionGeometry & { id: StripLayout; name: string })[];
+  motion_layouts?: MotionLayoutChoice[];
   creative?: {
     default_plan: CreativePlan;
     name: string;

@@ -70,13 +70,24 @@ test('chooses a Creative Collection composition and restores its capture directi
   await page.getByRole('link', { name: 'Multi-Photo Studio' }).click();
 
   await collection.getByRole('button', { name: 'Motion Study' }).click();
+  const layouts = page.getByRole('group', { name: 'Layout' });
+  await expect(layouts.getByRole('button', { name: 'Ascending Cut' })).toHaveAttribute('aria-pressed', 'true');
   await expect(choices.getByRole('button')).toHaveText(['4', '5', '6']);
   await choices.getByRole('button', { name: '5', exact: true }).click();
-  await expect(page.locator('.multi-photo-example .multi-photo-cell')).toHaveCount(5);
+  await expect(page.getByAltText('Ascending Cut sample print with 5 photos')).toBeVisible();
+  await layouts.getByRole('button', { name: 'Contact Stack' }).click();
+  await expect(choices).toHaveCount(0);
+  await expect(page.getByAltText('Contact Stack sample print with 4 photos')).toBeVisible();
+  await layouts.getByRole('button', { name: 'Match Cut' }).click();
+  const sample = page.getByAltText('Match Cut sample print with 4 photos');
+  await expect(sample).toBeVisible();
+  await expect.poll(() => sample.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(720);
   await page.getByRole('button', { name: 'Continue to camera' }).click();
   await expect(page.getByText('Set your starting pose.', { exact: true })).toBeVisible();
+  const saved = await page.request.get('/api/sessions/current');
+  expect((await saved.json()).multi_photo_plan).toEqual({ experience: 'motion-study', layout: 'match-cut', version: 1, count: 4 });
   await page.reload();
-  await expect(page.getByText('Photo 1 of 5', { exact: true })).toBeVisible();
+  await expect(page.getByText('Photo 1 of 4', { exact: true })).toBeVisible();
   await expect(page.getByText('Set your starting pose.', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Cancel session' }).click();
 });

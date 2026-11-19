@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 MIN_FRAMES = 2
@@ -15,6 +15,16 @@ class StripLayout(StrEnum):
     VERTICAL = "vertical"
     HORIZONTAL = "horizontal"
     GRID = "grid"
+
+
+class MotionStudyLayout(StrEnum):
+    CONTACT_STACK = "contact-stack"
+    MATCH_CUT = "match-cut"
+    ASCENDING_CUT = "ascending-cut"
+
+    @property
+    def counts(self) -> tuple[int, ...]:
+        return (4, 5, 6) if self == MotionStudyLayout.ASCENDING_CUT else (4,)
 
 
 class SignatureStripPlan(BaseModel):
@@ -41,6 +51,13 @@ class MotionStudyPlan(BaseModel):
     experience: Literal["motion-study"]
     version: Literal[1] = 1
     count: int = Field(default=4, ge=4, le=MAX_FRAMES, strict=True)
+    layout: MotionStudyLayout | None = Field(default=None, exclude_if=lambda layout: layout is None)
+
+    @model_validator(mode="after")
+    def validate_layout_count(self):
+        if self.layout is not None and self.count not in self.layout.counts:
+            raise ValueError("This Motion Study layout requires four photos.")
+        return self
 
 
 class MiniScenePlan(BaseModel):

@@ -11,9 +11,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.creative_sequences import creative_boxes
 from app.db import Base
 from app.filmstrip import dimensions, frame_boxes
+from app.motion_study import MOTION_DESIGNS, motion_preview
 from app.multi_photo import (
     DEFAULT_PLAN, LEGACY_STRIP_FILENAME, MAX_FRAMES, MIN_FRAMES, BetweenFramesPlan, CaptureDirections, CapturePlan,
-    MiniScenePlan, MotionStudyPlan, SignatureStripPlan, StripLayout, TimeSculpturePlan, capture_directions,
+    MiniScenePlan, MotionStudyLayout, MotionStudyPlan, SignatureStripPlan, StripLayout, TimeSculpturePlan, capture_directions,
 )
 from app.security import issue_token, token_digest
 
@@ -120,7 +121,8 @@ def multi_photo_studio(request: Request):
     grid_width, grid_height = dimensions(StripLayout.GRID)
     creative = [
         (BetweenFramesPlan(experience="between-frames"), "Pair contrasting expressions or poses in a diptych or triptych.", (2, 3)),
-        (MotionStudyPlan(experience="motion-study"), "Follow a series of pose cues and see one movement unfold across the page.", (4, 5, 6)),
+        (MotionStudyPlan(experience="motion-study", layout=MotionStudyLayout.ASCENDING_CUT),
+         "Follow a series of pose cues and see one movement unfold across the page.", MotionStudyLayout.ASCENDING_CUT.counts),
         (MiniScenePlan(experience="mini-scene"), "Tell a four-photo story with a setup, action, reaction, and ending.", (4,)),
     ]
     if request.app.state.settings.time_sculpture_enabled:
@@ -129,6 +131,12 @@ def multi_photo_studio(request: Request):
     return {
         "default_plan": DEFAULT_PLAN,
         "counts": list(range(MIN_FRAMES, MAX_FRAMES + 1)),
+        "motion_layouts": [
+            {"id": layout, "name": design.name, "description": design.description, "counts": layout.counts,
+             "previews": {count: f"/api/sessions/multi-photo-studio/motion-study/{layout}/{count}/preview"
+                          for count in layout.counts}}
+            for layout, design in MOTION_DESIGNS.items()
+        ],
         "layouts": [
             {
                 "id": layout,
@@ -161,6 +169,13 @@ def multi_photo_studio(request: Request):
             for plan, description, counts in creative
         ],
     }
+
+
+@router.get("/multi-photo-studio/motion-study/{layout}/{count}/preview")
+def preview_motion_layout(layout: MotionStudyLayout, count: int):
+    if count not in layout.counts:
+        raise HTTPException(404, "This layout has no preview for that number of photos.")
+    return Response(content=motion_preview(layout, count), media_type="image/jpeg")
 
 
 @router.post("", response_model=SessionView, status_code=201)
