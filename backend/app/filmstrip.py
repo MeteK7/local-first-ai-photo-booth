@@ -1,4 +1,4 @@
-"""Render the booth's three-frame Classic filmstrip from its original JPEGs."""
+"""Lay out and render Signature Strip compositions from ordered original JPEGs."""
 
 from io import BytesIO
 from pathlib import Path
@@ -6,23 +6,64 @@ from typing import Sequence
 
 from PIL import Image, ImageOps
 
-FRAME_COUNT = 3
-FRAME_SIZE = 560
-LEFT_MARGIN = 20
+from app.multi_photo import DEFAULT_PLAN, SignatureStripPlan, StripLayout
+
+FrameBox = tuple[int, int, int, int]
+STRIP_WIDTH, STRIP_HEIGHT = 600, 1800
+GRID_WIDTH, GRID_HEIGHT = 1800, 1200
 GAP = 30
-WIDTH = FRAME_SIZE + 2 * LEFT_MARGIN
-HEIGHT = FRAME_COUNT * FRAME_SIZE + (FRAME_COUNT + 1) * GAP
+STRIP_MARGIN = 20
+GRID_MARGIN = 40
 
 
-def render_filmstrip(originals: Sequence[Path]) -> bytes:
-    if len(originals) != FRAME_COUNT:
-        raise ValueError("A filmstrip needs exactly three originals")
-    with BytesIO() as output, Image.new("RGB", (WIDTH, HEIGHT), "white") as canvas:
-        for index, path in enumerate(originals):
+def dimensions(layout: StripLayout) -> tuple[int, int]:
+    if layout == StripLayout.GRID:
+        return GRID_WIDTH, GRID_HEIGHT
+    if layout == StripLayout.HORIZONTAL:
+        return STRIP_HEIGHT, STRIP_WIDTH
+    return STRIP_WIDTH, STRIP_HEIGHT
+
+
+def cells(length: int, count: int, margin: int) -> list[tuple[int, int]]:
+    available = length - 2 * margin - (count - 1) * GAP
+    return [
+        (margin + i * GAP + i * available // count, (i + 1) * available // count - i * available // count)
+        for i in range(count)
+    ]
+
+
+def frame_boxes(plan: SignatureStripPlan) -> list[FrameBox]:
+    if plan.layout == StripLayout.GRID:
+        # Two or three images share a single row. A five-shot grid gives two frames a wider crop.
+        row_counts = (plan.count,) if plan.count <= 3 else (plan.count // 2, (plan.count + 1) // 2)
+        return [
+            (x, y, width, height)
+            for columns, (y, height) in zip(row_counts, cells(GRID_HEIGHT, len(row_counts), GRID_MARGIN), strict=True)
+            for x, width in cells(GRID_WIDTH, columns, GRID_MARGIN)
+        ]
+    breadth = STRIP_WIDTH - 2 * STRIP_MARGIN
+    positions = cells(STRIP_HEIGHT, plan.count, GAP)
+    if plan.layout == StripLayout.HORIZONTAL:
+        return [(start, STRIP_MARGIN, length, breadth) for start, length in positions]
+    return [(STRIP_MARGIN, start, breadth, length) for start, length in positions]
+
+
+def render_filmstrip(originals: Sequence[Path], plan: SignatureStripPlan = DEFAULT_PLAN) -> bytes:
+    if len(originals) != plan.count:
+        raise ValueError("The number of originals must match the capture plan")
+    with BytesIO() as output, Image.new("RGB", dimensions(plan.layout), "white") as canvas:
+        for path, (x, y, width, height) in zip(originals, frame_boxes(plan), strict=True):
             with Image.open(path, formats=("JPEG",)) as image:
                 ImageOps.exif_transpose(image, in_place=True)
                 with image.convert("RGB") as rgb:
-                    with ImageOps.fit(rgb, (FRAME_SIZE, FRAME_SIZE), Image.Resampling.LANCZOS) as frame:
-                        canvas.paste(frame, (LEFT_MARGIN, GAP + index * (FRAME_SIZE + GAP)))
+                    ratio = (rgb.width / rgb.height) / (width / height)
+                    # Preserve the familiar square crop. For new proportions, keep the full photo
+                    # when filling the frame would remove more than a third of the original.
+                    if plan != DEFAULT_PLAN and min(ratio, 1 / ratio) < 2 / 3:
+                        with ImageOps.pad(rgb, (width, height), Image.Resampling.LANCZOS, color="#ececf1") as frame:
+                            canvas.paste(frame, (x, y))
+                    else:
+                        with ImageOps.fit(rgb, (width, height), Image.Resampling.LANCZOS) as frame:
+                            canvas.paste(frame, (x, y))
         canvas.save(output, format="JPEG", quality=94, subsampling=0, dpi=(300, 300))
         return output.getvalue()

@@ -12,12 +12,12 @@ from starlette.staticfiles import StaticFiles
 
 from app.admin import LoginThrottle
 from app.admin import router as admin_router
-from app.ai_photos import ai_worker, router as ai_router
+from app.ai_photos import router as legacy_effect_router
 from app.camera import Camera, CameraFailure, CameraStatus
 from app.config import Settings
+from app.creative import creative_worker, router as creative_router
 from app.db import make_engine
 from app.downloads import delivery_listener, router as downloads_router
-from app.image_provider import ImageProvider, select_provider
 from app.media import MEDIA_AREAS, prepare_storage
 from app.photos import router as photos_router
 from app.printing import print_worker, router as printing_router
@@ -27,14 +27,13 @@ log = logging.getLogger("uvicorn.error")
 LOCAL_ORIGINS = {
     f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (4200, 8000)
 }
-SCHEMA_REVISION = "20261118_07"
+SCHEMA_REVISION = "20261119_09"
 
 
-def create_app(settings: Settings | None = None, *, image_provider: ImageProvider | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     engine = make_engine(settings)
     camera = Camera(settings.camera_enabled)
-    provider = image_provider if image_provider is not None else select_provider(settings.ai_mode)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -46,7 +45,7 @@ def create_app(settings: Settings | None = None, *, image_provider: ImageProvide
         try:
             async with delivery_listener(settings, app.state.db) as base:
                 app.state.download_base = base
-                async with print_worker(settings, app.state.db), ai_worker(settings, app.state.db, provider):
+                async with print_worker(settings, app.state.db), creative_worker(settings, app.state.db):
                     yield
         finally:
             camera.close()
@@ -60,7 +59,6 @@ def create_app(settings: Settings | None = None, *, image_provider: ImageProvide
     app.state.login_throttle = LoginThrottle()
     app.state.camera = camera
     app.state.download_base = None
-    app.state.image_provider = provider
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     @app.middleware("http")
@@ -120,14 +118,15 @@ def create_app(settings: Settings | None = None, *, image_provider: ImageProvide
     app.include_router(photos_router)
     app.include_router(downloads_router)
     app.include_router(printing_router)
-    app.include_router(ai_router)
+    app.include_router(creative_router)
+    app.include_router(legacy_effect_router)
     app.include_router(admin_router)
     index = settings.frontend_dir / "index.html"
     if index.is_file():
         def spa():
             return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
-        for route in ("/", "/session", "/admin"):
+        for route in ("/", "/multi-photo-studio", "/session", "/admin"):
             app.add_api_route(route, spa, methods=["GET"])
         app.mount("/", StaticFiles(directory=settings.frontend_dir), name="frontend")
     return app

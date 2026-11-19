@@ -3,6 +3,7 @@ import { Component } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { provideRouter, RouterLink, RouterOutlet } from '@angular/router';
 import { Admin } from './app/admin/admin';
+import { MultiPhotoStudio } from './app/customer/multi-photo-studio';
 import { SessionPage } from './app/customer/session';
 import { Welcome } from './app/customer/welcome';
 
@@ -22,6 +23,7 @@ bootstrapApplication(App, {
   providers: [
     provideRouter([
       { path: '', component: Welcome },
+      { path: 'multi-photo-studio', component: MultiPhotoStudio },
       { path: 'session', component: SessionPage },
       { path: 'admin', component: Admin },
       { path: '**', redirectTo: '' },

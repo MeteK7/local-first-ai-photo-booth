@@ -1,5 +1,7 @@
 # Stage 6 · Local photo effect preview
 
+This records the earlier local preview. The color grade now appears as **Classic Filter** in [Creative Studio](creative-studio.md).
+
 Set `PHOTOBOOTH_AI_MODE=preview` in the booth's local `.env`, run `.\.venv\Scripts\python.exe -m alembic -c .\backend\alembic.ini upgrade head` from the project root, and restart the booth. Set `PHOTOBOOTH_AI_MODE=disabled` and restart to turn off processing. The default configuration is `disabled`.
 
 1. Start a **Single photo** session and take a photo.

@@ -1,6 +1,5 @@
 from ipaddress import IPv4Interface, IPv4Network
 from pathlib import Path
-from typing import Literal
 
 from pydantic import Field, PositiveInt, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,7 +26,6 @@ class Settings(BaseSettings):
     download_port: int = Field(default=8001, ge=1, le=65535)
     download_ttl_minutes: PositiveInt = 10
     printer_name: str | None = None
-    ai_mode: Literal["disabled", "preview"] = "disabled"
 
     @field_validator("download_bind")
     @classmethod

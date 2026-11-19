@@ -11,7 +11,6 @@ import { Api, message, PhoneLink, PhotoResultKind } from '../shared/api';
       <span class="action-icon qr-icon" aria-hidden="true"></span>
       <span>
         @if (pending()) { Creating QR code… }
-        @else if (kind() === 'effect') { {{ link() ? 'New effect QR code' : 'Download effect on phone' }} }
         @else { {{ link() ? 'New QR code' : 'Download on phone' }} }
       </span>
     </button>
@@ -32,12 +31,13 @@ export class PhoneDownloadAction {
   private readonly api = inject(Api);
   readonly assetId = input.required<string>();
   readonly kind = input.required<PhotoResultKind>();
+  readonly label = input('');
   readonly disabled = input(false);
   readonly link = signal<PhoneLink | null>(null);
   readonly pending = signal(false);
   readonly error = signal('');
-  readonly resultName = computed(() => ({
-    original: 'Original photo', filmstrip: 'Classic filmstrip', effect: 'Processed photo',
+  readonly resultName = computed(() => this.label() || ({
+    original: 'Original photo', filmstrip: 'Signature Strip', effect: 'Processed photo', creative: 'Creative Studio photo',
   })[this.kind()]);
 
   async createLink(): Promise<void> {

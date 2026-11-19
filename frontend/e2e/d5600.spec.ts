@@ -53,7 +53,7 @@ test('takes and downloads a full-resolution photo on the physical D5600', async 
   }
 });
 
-test('builds a Classic filmstrip from three physical D5600 captures', async ({ page, baseURL }) => {
+test('builds a vertical Signature Strip from three physical D5600 captures', async ({ page, baseURL }) => {
   test.skip(process.env['PHOTOBOOTH_HARDWARE_TESTS'] !== '1', 'This test fires three real shutter releases.');
   test.setTimeout(100_000);
   const photos = '/api/sessions/current/photos';
@@ -67,13 +67,14 @@ test('builds a Classic filmstrip from three physical D5600 captures', async ({ p
   });
   try {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Classic filmstrip' }).click();
+    await page.getByRole('link', { name: 'Multi-Photo Studio' }).click();
+    await page.getByRole('button', { name: 'Continue to camera' }).click();
     await expect(page.getByText('Photo 1 of 3', { exact: true })).toBeVisible();
-    const start = page.getByRole('button', { name: 'Take three photos' });
+    const start = page.getByRole('button', { name: 'Take 3 photos' });
     await expect(start).toBeEnabled({ timeout: 15_000 });
     await start.click();
 
-    const preview = page.getByAltText('Your Classic filmstrip');
+    const preview = page.getByAltText('Your Signature Strip composition');
     await expect(preview).toBeVisible({ timeout: 75_000 });
     expect(responses).toEqual([201, 201, 201]);
     const photosTaken = await Promise.all(originals);
@@ -85,11 +86,11 @@ test('builds a Classic filmstrip from three physical D5600 captures', async ({ p
     await page.reload();
     await expect(preview).toBeVisible();
     const downloadEvent = page.waitForEvent('download');
-    const downloadLink = page.getByRole('link', { name: 'Download filmstrip' });
+    const downloadLink = page.getByRole('link', { name: 'Download composition' });
     const url = (await downloadLink.getAttribute('href'))!;
     await downloadLink.click();
     const download = await downloadEvent;
-    expect(download.suggestedFilename()).toBe('classic-filmstrip.jpg');
+    expect(download.suggestedFilename()).toBe('signature-strip.jpg');
     expect((await readFile((await download.path())!)).length).toBeGreaterThan(0);
     await page.getByRole('button', { name: 'Finish session' }).click();
     await expect(page.getByRole('button', { name: 'Single photo' })).toBeVisible();

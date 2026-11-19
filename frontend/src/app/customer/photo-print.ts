@@ -10,7 +10,6 @@ import { Api, message, PhotoResultKind, PrintJob } from '../shared/api';
         <span class="action-icon print-icon" aria-hidden="true"></span>
         <span>
           @if (sending()) { Sending print… }
-          @else if (kind() === 'effect') { {{ job() ? 'Retry effect print' : 'Print effect' }} }
           @else { {{ job() ? 'Retry print' : 'Print' }} }
         </span>
       </button>

@@ -1,17 +1,18 @@
 import { Component, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
-import { Api, Experience, message } from '../shared/api';
+import { Router, RouterLink } from '@angular/router';
+import { Api, message } from '../shared/api';
 
 @Component({
   selector: 'app-welcome',
+  imports: [RouterLink],
   template: `
     <section class="welcome">
       <div class="welcome-copy">
         <h1>Your moment.<br>In focus.</h1>
-        <p class="intro">Choose a single photo or a three-shot filmstrip.</p>
+        <p class="intro">Take a single photo or capture a series in Multi-Photo Studio.</p>
         <div class="actions">
-          <button class="primary" type="button" [disabled]="busy()" (click)="start('single')">Single photo</button>
-          <button class="secondary" type="button" [disabled]="busy()" (click)="start('filmstrip')">Classic filmstrip</button>
+          <button class="primary" type="button" [disabled]="busy()" (click)="startSingle()">Single photo</button>
+          <a class="secondary" routerLink="/multi-photo-studio">Multi-Photo Studio</a>
         </div>
         @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
       </div>
@@ -25,12 +26,12 @@ export class Welcome {
   readonly busy = signal(false);
   readonly error = signal('');
 
-  async start(experience: Experience): Promise<void> {
+  async startSingle(): Promise<void> {
     if (this.busy()) return;
     this.busy.set(true);
     this.error.set('');
     try {
-      await this.api.start(experience);
+      await this.api.start('single');
       await this.router.navigateByUrl('/session');
     } catch (error) {
       this.error.set(message(error, 'The booth is unavailable. Please try again.'));

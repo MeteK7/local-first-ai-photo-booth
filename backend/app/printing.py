@@ -22,7 +22,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.config import ROOT, Settings
 from app.db import Base
 from app.media import asset_path
-from app.photos import require_session, stored_file
+from app.multi_photo import StripLayout
+from app.photos import Filmstrip, require_session, stored_file
 from app.results import RESULT_AREAS, PhotoResultKind, require_owned_result
 
 router = APIRouter(prefix="/api/sessions/current/photos/print-jobs", tags=["printing"])
@@ -45,7 +46,8 @@ class PrintState(StrEnum):
 class PrintJob(Base):
     __tablename__ = "print_jobs"
     __table_args__ = (
-        CheckConstraint("num_nonnulls(original_id, filmstrip_id, effect_id) = 1", name="print_job_one_asset"),
+        CheckConstraint("num_nonnulls(original_id, filmstrip_id, effect_id, creative_id) = 1",
+                        name="print_job_one_asset"),
         CheckConstraint("state IN ('queued', 'submitting', 'submitted', 'sent', 'failed', 'unknown')",
                         name="print_job_state"),
         Index("ix_print_jobs_state_updated_at", "state", "updated_at"),
@@ -55,6 +57,7 @@ class PrintJob(Base):
     original_id: Mapped[UUID | None] = mapped_column(ForeignKey("original_photos.id"), unique=True)
     filmstrip_id: Mapped[UUID | None] = mapped_column(ForeignKey("filmstrips.id"), unique=True)
     effect_id: Mapped[UUID | None] = mapped_column(ForeignKey("ai_jobs.id"), unique=True)
+    creative_id: Mapped[UUID | None] = mapped_column(ForeignKey("creative_results.id"), unique=True)
     printer: Mapped[str]
     state: Mapped[str] = mapped_column(String(16))
     detail: Mapped[str]
@@ -86,7 +89,10 @@ def printer_configured(settings: Settings) -> bool:
 
 
 def result_job(db, asset_id: UUID, kind: PhotoResultKind) -> PrintJob | None:
-    column = {"original": PrintJob.original_id, "filmstrip": PrintJob.filmstrip_id, "effect": PrintJob.effect_id}[kind]
+    column = {
+        "original": PrintJob.original_id, "filmstrip": PrintJob.filmstrip_id,
+        "effect": PrintJob.effect_id, "creative": PrintJob.creative_id,
+    }[kind]
     return db.scalar(select(PrintJob).where(column == asset_id))
 
 
@@ -119,6 +125,7 @@ def request_print(body: PrintRequest, request: Request, response: Response,
                 id=uuid4(), created_at=now, original_id=asset if body.kind == "original" else None,
                 filmstrip_id=asset if body.kind == "filmstrip" else None,
                 effect_id=asset if body.kind == "effect" else None,
+                creative_id=asset if body.kind == "creative" else None,
             )
             db.add(job)
         job.printer = settings.printer_name
@@ -126,7 +133,7 @@ def request_print(body: PrintRequest, request: Request, response: Response,
         return job
 
 
-def windows_job(job: PrintJob, image: Path | None) -> SpoolResult:
+def windows_job(job: PrintJob, image: Path | None, layout: str = "Photo") -> SpoolResult:
     executable = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     command = [
         str(executable), "-NoProfile", "-NonInteractive", "-File", str(ROOT / "scripts/print-jpeg.ps1"),
@@ -134,7 +141,7 @@ def windows_job(job: PrintJob, image: Path | None) -> SpoolResult:
         "-Printer", job.printer, "-Document", f"Photo Booth {job.id}",
     ]
     if image is not None:
-        command.extend(["-Layout", "Filmstrip" if job.filmstrip_id else "Photo", "-ImagePath", str(image)])
+        command.extend(["-Layout", layout, "-ImagePath", str(image)])
     try:
         result = subprocess.run(command, capture_output=True, timeout=SUBMISSION_TIMEOUT if image else 8,
                                 creationflags=subprocess.CREATE_NO_WINDOW, check=True)
@@ -153,34 +160,47 @@ def windows_job(job: PrintJob, image: Path | None) -> SpoolResult:
         return SpoolResult(PrintState.SUBMITTED, "Waiting for Windows to report the print status.")
 
 
-def next_job(sessions) -> PrintJob | None:
+def next_job(sessions) -> tuple[PrintJob, str] | None:
     now = datetime.now(UTC)
     with sessions.begin() as db:
-        job = db.scalar(
-            select(PrintJob).where(
+        row = db.execute(
+            select(PrintJob, Filmstrip.layout).outerjoin(Filmstrip, Filmstrip.id == PrintJob.filmstrip_id).where(
                 (PrintJob.state.in_((PrintState.QUEUED, PrintState.SUBMITTED))) |
                 ((PrintJob.state == PrintState.SUBMITTING) & (PrintJob.updated_at < now - RECOVERY_DELAY))
-            ).order_by(PrintJob.updated_at).limit(1).with_for_update(skip_locked=True)
-        )
-        if job is not None and job.state == PrintState.QUEUED:
+            ).order_by(PrintJob.updated_at).limit(1).with_for_update(of=PrintJob, skip_locked=True)
+        ).first()
+        if row is None:
+            return None
+        job, strip_layout = row
+        if job.state == PrintState.QUEUED:
             job.state, job.detail = PrintState.SUBMITTING, "Sending to the printer…"
             job.updated_at = now
-        elif job is not None and job.state == PrintState.SUBMITTING:
+        elif job.state == PrintState.SUBMITTING:
             # The prior worker may have printed before it could record the Windows result.
             job.state, job.detail, job.updated_at = PrintState.UNKNOWN, UNCERTAIN_DETAIL, now
-        return job
+        layout = "Photo"
+        if job.filmstrip_id:
+            layout = {StripLayout.HORIZONTAL: "HorizontalStrip", StripLayout.GRID: "Photo"}.get(
+                strip_layout, "Filmstrip",
+            )
+        return job, layout
 
 
 def process_print_queue(settings: Settings, sessions) -> None:
-    job = next_job(sessions)
-    if job is None or job.state == PrintState.UNKNOWN:
+    claimed = next_job(sessions)
+    if claimed is None:
+        return
+    job, layout = claimed
+    if job.state == PrintState.UNKNOWN:
         return
     if job.state == PrintState.SUBMITTED:
         result = windows_job(job, None)
     elif job.printer != settings.printer_name:
         result = SpoolResult(PrintState.FAILED, "The configured printer changed. Check it and try again.")
     else:
-        if job.effect_id:
+        if job.creative_id:
+            kind, asset = "creative", job.creative_id
+        elif job.effect_id:
             kind, asset = "effect", job.effect_id
         elif job.filmstrip_id:
             kind, asset = "filmstrip", job.filmstrip_id
@@ -193,7 +213,7 @@ def process_print_queue(settings: Settings, sessions) -> None:
         except (OSError, ValueError):
             result = SpoolResult(PrintState.FAILED, "The saved image is unavailable for printing.")
         else:
-            result = windows_job(job, image)
+            result = windows_job(job, image, layout)
     with sessions.begin() as db:
         current = db.get(PrintJob, job.id, with_for_update=True)
         if current is not None and current.state == job.state and current.updated_at == job.updated_at:

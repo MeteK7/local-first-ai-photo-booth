@@ -5,7 +5,6 @@ from io import BytesIO
 from ipaddress import IPv4Interface
 from pathlib import Path
 from secrets import token_urlsafe
-from threading import Event
 from time import monotonic, sleep
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -25,8 +24,8 @@ from app.main import create_app
 from app.media import asset_path, save_jpeg, save_original
 from app.photos import Filmstrip, OriginalPhoto
 from app import printing
-from app.ai_photos import AIJob, JobState, run_job
-from app.image_provider import LocalPreviewProvider
+from app.ai_photos import AIJob
+from app.creative_renderers import CATALOG, render
 from app.security import hash_password, token_digest
 
 pytestmark = pytest.mark.postgres
@@ -39,7 +38,7 @@ def settings(tmp_path):
     if os.environ.get("PHOTOBOOTH_RUN_DB_TESTS") != "1":
         pytest.skip("Set PHOTOBOOTH_RUN_DB_TESTS=1 to opt into PostgreSQL tests.")
     cfg = Settings(db_name="photobooth_test", data_root=tmp_path, frontend_dir=tmp_path / "web",
-                   camera_enabled=False, download_bind=None, printer_name=None, ai_mode="disabled")
+                   camera_enabled=False, download_bind=None, printer_name=None)
     if cfg.db_host not in {"127.0.0.1", "localhost"}:
         pytest.fail("Database integration tests require loopback PostgreSQL.")
     engine = make_engine(cfg)
@@ -255,7 +254,7 @@ def test_print_job_retries_safe_failure_and_deduplicates(settings, monkeypatch):
         printing.SpoolResult(printing.PrintState.SENT, "Sent to the printer."),
     ])
 
-    def spool(job, image):
+    def spool(job, image, layout="Photo"):
         queued_calls.append((job.id, image))
         return next(outcomes)
 
@@ -301,7 +300,7 @@ def test_print_job_retries_safe_failure_and_deduplicates(settings, monkeypatch):
         assert len(queued_calls) == 3
 
 
-def seed_effect_original(app, settings, session_id, jpeg, width=60, height=40):
+def seed_original(app, settings, session_id, jpeg, width=60, height=40):
     photo = uuid4()
     save_original(settings.data_root, photo, jpeg)
     with app.state.db.begin() as db:
@@ -310,211 +309,238 @@ def seed_effect_original(app, settings, session_id, jpeg, width=60, height=40):
     return photo
 
 
-def test_effect_phone_link_only_serves_its_completed_result_until_expiry_or_cancel(settings):
+PHOTOS = "/api/sessions/current/photos"
+STUDIO = f"{PHOTOS}/creative"
+PHONE_LINKS = f"{PHOTOS}/phone-links"
+PRINT_JOBS = f"{PHOTOS}/print-jobs"
+
+
+def sample_jpeg():
+    with BytesIO() as output, Image.new("RGB", (60, 40), (225, 80, 50)) as image:
+        image.paste((51, 76, 124), (15, 8, 40, 31))
+        image.save(output, format="JPEG")
+        return output.getvalue()
+
+
+@pytest.mark.parametrize(("layout", "count", "size", "print_layout"), [
+    ("vertical", 2, (600, 1800), "Filmstrip"),
+    ("horizontal", 4, (1800, 600), "HorizontalStrip"),
+    ("grid", 6, (1800, 1200), "Photo"),
+])
+def test_signature_strip_resumes_and_delivers_the_same_result(settings, monkeypatch, layout, count, size, print_layout):
     app = create_app(settings)
-    provider = LocalPreviewProvider()
+    interface = IPv4Interface("192.168.42.7/24")
+    lan_base = f"http://{interface.ip}:8001"
+    lan_app = create_delivery_app(settings.model_copy(update={"download_bind": interface}), app.state.db)
+    submitted = []
+
+    def print_image(job, image, profile):
+        submitted.append((job.filmstrip_id, image.read_bytes(), profile))
+        return printing.SpoolResult(printing.PrintState.SENT, "Sent to the printer.")
+
+    monkeypatch.setattr(printing, "windows_job", print_image)
+    monkeypatch.setattr(printing, "printer_configured", lambda config: bool(config.printer_name))
+    with (
+        TestClient(app, base_url=BASE) as owner,
+        TestClient(app, base_url=BASE) as other,
+        TestClient(lan_app, base_url=lan_base, client=("192.168.42.100", 50000)) as phone,
+    ):
+        selection = {"experience": "signature-strip", "version": 1, "count": count, "layout": layout}
+        body = {"experience": "filmstrip", "multi_photo_plan": selection}
+        for changes in ({"count": 1}, {"count": 7}, {"layout": "album"}, {"version": 2}):
+            revised = {**selection, **changes}
+            assert owner.post("/api/sessions", json={**body, "multi_photo_plan": revised}, headers=HEADERS).status_code == 422
+        assert owner.post("/api/sessions", json={**body, "experience": "single"}, headers=HEADERS).status_code == 422
+        session = owner.post("/api/sessions", json=body, headers=HEADERS).raise_for_status().json()
+        assert owner.get("/api/sessions/current").json()["multi_photo_plan"] == selection
+        resumed = owner.post("/api/sessions", headers=HEADERS).raise_for_status().json()
+        assert (resumed["id"], resumed["multi_photo_plan"]) == (session["id"], selection)
+        other.post("/api/sessions", json=body, headers=HEADERS).raise_for_status()
+        assert owner.post(PHOTOS, json={"request_id": str(uuid4()), "slot": 2}, headers=HEADERS).status_code == 409
+        assert owner.post(PHOTOS, json={"request_id": str(uuid4()), "slot": 1}, headers=HEADERS).status_code == 503
+
+        jpeg = sample_jpeg()
+        ids, request_ids = [uuid4() for _ in range(count)], [uuid4() for _ in range(count)]
+        for slot, (photo, request_id) in enumerate(zip(ids, request_ids, strict=True), 1):
+            save_original(settings.data_root, photo, jpeg)
+            with app.state.db.begin() as db:
+                db.add(OriginalPhoto(id=photo, session_id=UUID(session["id"]), request_id=request_id, capture_slot=slot,
+                                     captured_at=datetime.now(UTC), byte_size=len(jpeg), width=60, height=40))
+            if slot == 1:
+                progress = owner.get(f"{PHOTOS}/filmstrip").json()
+                assert progress == {"captured": 1, "required": count, "result": None}
+                token = owner.cookies.get("booth_customer")
+                with TestClient(app, base_url=BASE) as reopened:
+                    reopened.cookies.set("booth_customer", token, path="/api/sessions")
+                    replay = reopened.post(PHOTOS, json={"request_id": str(uuid4()), "slot": 1}, headers=HEADERS)
+                    assert replay.status_code == 200 and replay.json()["id"] == str(photo)
+                conflict = owner.post(PHOTOS, json={"request_id": str(request_id), "slot": 2}, headers=HEADERS)
+                assert conflict.status_code == 409
+
+        assert owner.post(PHOTOS, json={"request_id": str(uuid4())}, headers=HEADERS).status_code == 409
+        result = owner.post(f"{PHOTOS}/filmstrip", headers=HEADERS).raise_for_status().json()
+        assert (result["width"], result["height"]) == size
+        assert owner.post(f"{PHOTOS}/filmstrip", headers=HEADERS).json() == result
+        result_path = f"{PHOTOS}/filmstrip/{result['id']}"
+        preview = owner.get(f"{result_path}/preview").raise_for_status().content
+        download = owner.get(f"{result_path}/download").raise_for_status()
+        assert download.content == preview
+        assert 'filename="signature-strip.jpg"' in download.headers["content-disposition"]
+        assert other.get(f"{result_path}/preview").status_code == 404
+
+        app.state.download_base = lan_base
+        settings.printer_name = "Isolated test queue"
+        asset = {"asset_id": result["id"], "kind": "filmstrip"}
+        assert other.post(PHONE_LINKS, json=asset, headers=HEADERS).status_code == 404
+        assert other.post(PRINT_JOBS, json=asset, headers=HEADERS).status_code == 404
+        grant = owner.post(PHONE_LINKS, json=asset, headers=HEADERS).raise_for_status().json()
+        phone_download = phone.get(urlsplit(grant["url"]).path).raise_for_status()
+        assert phone_download.content == preview
+        assert phone_download.headers["content-disposition"] == download.headers["content-disposition"]
+        owner.post(PRINT_JOBS, json=asset, headers=HEADERS).raise_for_status()
+        printing.process_print_queue(settings, app.state.db)
+        assert submitted == [(UUID(result["id"]), preview, print_layout)]
+        assert all(asset_path(settings.data_root, "originals", photo).read_bytes() == jpeg for photo in ids)
+
+
+def wait_for_result(kiosk, asset, treatment, state):
+    deadline = monotonic() + 15
+    while monotonic() < deadline:
+        options = kiosk.get(STUDIO, params={"asset_id": str(asset)}).raise_for_status().json()
+        result = next(option["result"] for option in options if option["id"] == treatment)
+        if result and result["state"] == state:
+            return result
+        if result and result["state"] in {"failed", "canceled"}:
+            pytest.fail(result["detail"])
+        sleep(.05)
+    pytest.fail(f"Timed out waiting for {treatment} to be {state}.")
+
+
+def test_creative_results_are_local_and_deliver_the_selected_jpeg(settings, monkeypatch):
+    app = create_app(settings)
     interface = IPv4Interface("192.168.42.7/24")
     lan_base = f"http://{interface.ip}:8001"
     lan = create_delivery_app(settings.model_copy(update={"download_bind": interface}), app.state.db)
-    effects = "/api/sessions/current/photos/ai"
-    links = "/api/sessions/current/photos/phone-links"
-    with BytesIO() as output, Image.new("RGB", (60, 40), (225, 80, 50)) as image:
-        image.save(output, format="JPEG")
-        original = output.getvalue()
+    spool_calls = []
 
-    def queue_effect(kiosk):
-        session = kiosk.post("/api/sessions", headers=HEADERS).raise_for_status().json()
-        photo = seed_effect_original(app, settings, session["id"], original)
-        job = kiosk.post(effects, headers=HEADERS, json={
-            "asset_id": str(photo), "template_id": "cinematic-portrait", "consent": True,
-        }).raise_for_status().json()
-        return photo, {"asset_id": job["id"], "kind": "effect"}
+    def spool(job, image, layout="Photo"):
+        spool_calls.append((str(job.creative_id), image.read_bytes()))
+        return printing.SpoolResult(printing.PrintState.SENT, "Sent to the printer.")
 
+    monkeypatch.setattr(printing, "windows_job", spool)
+    monkeypatch.setattr(printing, "printer_configured", lambda config: bool(config.printer_name))
+    original = sample_jpeg()
     with (
         TestClient(app, base_url=BASE) as owner,
         TestClient(app, base_url=BASE) as other,
         TestClient(lan, base_url=lan_base, client=("192.168.42.100", 50000)) as phone,
         TestClient(lan, base_url=lan_base, client=("192.168.43.100", 50000)) as external,
     ):
-        app.state.image_provider = provider
+        session = owner.post("/api/sessions", headers=HEADERS).raise_for_status().json()
+        other.post("/api/sessions", headers=HEADERS).raise_for_status()
+        source = seed_original(app, settings, session["id"], original)
         app.state.download_base = lan_base
-        photo, effect = queue_effect(owner)
-        assert owner.post(links, json=effect, headers=HEADERS).status_code == 404
-        run_job(settings, app.state.db, provider)
-        _, other_effect = queue_effect(other)
-        run_job(settings, app.state.db, provider)
-        assert other.post(links, json=effect, headers=HEADERS).status_code == 404
-        assert owner.post(links, json=other_effect, headers=HEADERS).status_code == 404
+        settings.printer_name = "Isolated test queue"
+        options = owner.get(STUDIO, params={"asset_id": source}).raise_for_status().json()
+        assert [option["id"] for option in options] == list(CATALOG)
+        assert all(option["result"] is None for option in options)
+        assert other.get(STUDIO, params={"asset_id": source}).status_code == 404
+        assert owner.post(f"{PHOTOS}/ai", json={}, headers=HEADERS).status_code == 404
 
-        processed = owner.get(f"{effects}/{effect['asset_id']}/download").raise_for_status().content
-        grant = owner.post(links, json=effect, headers=HEADERS).raise_for_status().json()
-        original_grant = owner.post(links, json={"asset_id": str(photo), "kind": "original"},
-                                    headers=HEADERS).raise_for_status().json()
+        ids = []
+        outputs = []
+        for treatment in CATALOG:
+            args = {"asset_id": str(source), "treatment": treatment}
+            assert other.post(STUDIO, json=args, headers=HEADERS).status_code == 404
+            queued = owner.post(STUDIO, json=args, headers=HEADERS)
+            assert queued.status_code == 202 and queued.json()["state"] == "queued"
+            result = wait_for_result(owner, source, treatment, "completed")
+            assert result["id"] == queued.json()["id"] and result["kind"] == "creative"
+            duplicate = owner.post(STUDIO, json=args, headers=HEADERS)
+            assert duplicate.status_code == 200 and duplicate.json() == result
+            ids.append(result["id"])
+            jpeg = owner.get(f"{STUDIO}/{result['id']}/preview").raise_for_status().content
+            assert owner.get(f"{STUDIO}/{result['id']}/download").raise_for_status().content == jpeg
+            assert other.get(f"{STUDIO}/{result['id']}/download").status_code == 404
+            outputs.append(jpeg)
+        assert len(set(ids)) == len(set(outputs)) == 4
+        assert asset_path(settings.data_root, "originals", source).read_bytes() == original
+
+        selected = {"asset_id": ids[1], "kind": "creative"}
+        assert other.post(PHONE_LINKS, json=selected, headers=HEADERS).status_code == 404
+        assert other.post(PRINT_JOBS, json=selected, headers=HEADERS).status_code == 404
+        grant = owner.post(PHONE_LINKS, json=selected, headers=HEADERS).raise_for_status().json()
         path = urlsplit(grant["url"]).path
-        assert path != urlsplit(original_grant["url"]).path
-        response = phone.get(path).raise_for_status()
-        assert response.content == processed and response.content != original
-        assert 'filename="photo-booth-effect.jpg"' in response.headers["content-disposition"]
-        assert phone.get(urlsplit(original_grant["url"]).path).content == original
+        assert phone.get(path).raise_for_status().content == outputs[1]
         assert external.get(path).status_code == 404
-        assert phone.get(f"{effects}/{effect['asset_id']}/download").status_code == 404
+        assert phone.get(STUDIO, params={"asset_id": source}).status_code == 404
+        submitted = owner.post(PRINT_JOBS, json=selected, headers=HEADERS).raise_for_status().json()
+        printing.process_print_queue(settings, app.state.db)
+        assert spool_calls == [(ids[1], outputs[1])]
+        assert owner.get(PRINT_JOBS, params=selected).json()["id"] == submitted["id"]
+        assert owner.get(PRINT_JOBS, params={"asset_id": ids[0], "kind": "creative"}).json() is None
 
         owner.post("/api/sessions/current/finish", json={"state": "completed"}, headers=HEADERS).raise_for_status()
-        assert phone.get(path).content == processed
+        assert phone.get(path).content == outputs[1]
         with app.state.db.begin() as db:
-            stored = db.get(DownloadLink, token_digest(path.removeprefix("/d/")))
-            assert stored.effect_id == UUID(effect["asset_id"])
-            stored.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+            link = db.get(DownloadLink, token_digest(path.removeprefix("/d/")))
+            assert link.creative_id == UUID(ids[1])
+            link.expires_at = datetime.now(UTC) - timedelta(seconds=1)
         assert phone.get(path).status_code == 404
-        other_link = other.post(links, json=other_effect, headers=HEADERS).raise_for_status().json()
-        other_path = urlsplit(other_link["url"]).path
-        assert phone.get(other_path).status_code == 200
-        other.post("/api/sessions/current/finish", json={"state": "canceled"}, headers=HEADERS).raise_for_status()
-        assert phone.get(other_path).status_code == 404
 
 
-def test_print_effect_uses_completed_jpeg_and_a_separate_job_from_original(settings, monkeypatch):
+def test_creative_failure_can_retry_and_filmstrip_cannot_request_treatments(settings):
     app = create_app(settings)
-    provider = LocalPreviewProvider()
-    endpoint = "/api/sessions/current/photos/print-jobs"
-    queued_calls = []
-
-    def spool(job, image):
-        queued_calls.append((str(job.id), image, image.read_bytes()))
-        return printing.SpoolResult(printing.PrintState.SENT, "Sent to the printer.")
-
-    monkeypatch.setattr(printing, "windows_job", spool)
-    with BytesIO() as output, Image.new("RGB", (60, 40), (225, 80, 50)) as image:
-        image.save(output, format="JPEG")
-        original = output.getvalue()
-    with TestClient(app, base_url=BASE) as owner, TestClient(app, base_url=BASE) as other:
-        session = owner.post("/api/sessions", headers=HEADERS).raise_for_status().json()
-        other.post("/api/sessions", headers=HEADERS).raise_for_status()
-        photo = seed_effect_original(app, settings, session["id"], original)
-        app.state.image_provider = provider
-        settings.printer_name = "Isolated test queue"
-        monkeypatch.setattr(printing, "printer_configured", lambda config: bool(config.printer_name))
-        effects = "/api/sessions/current/photos/ai"
-        requested = owner.post(effects, headers=HEADERS, json={
-            "asset_id": str(photo), "template_id": "cinematic-portrait", "consent": True,
-        }).raise_for_status().json()
-        effect_id = requested["id"]
-        effect_asset = {"asset_id": effect_id, "kind": "effect"}
-        original_asset = {"asset_id": str(photo), "kind": "original"}
-        assert owner.get(endpoint, params=effect_asset).status_code == 404
-        assert owner.post(endpoint, json=effect_asset, headers=HEADERS).status_code == 404
-
-        run_job(settings, app.state.db, provider)
-        effect = owner.get(f"{effects}/{effect_id}/download").raise_for_status().content
-        assert effect != original
-        assert other.get(endpoint, params=effect_asset).status_code == 404
-        assert other.post(endpoint, json=effect_asset, headers=HEADERS).status_code == 404
-        assert owner.get(endpoint, params=effect_asset).json() is None
-        queued_effect = owner.post(endpoint, json=effect_asset, headers=HEADERS)
-        assert queued_effect.status_code == 202
-        effect_print_id = queued_effect.json()["id"]
-        duplicate = owner.post(endpoint, json=effect_asset, headers=HEADERS)
-        assert duplicate.status_code == 200 and duplicate.json()["id"] == effect_print_id
-        printing.process_print_queue(settings, app.state.db)
-        assert queued_calls == [(effect_print_id, asset_path(settings.data_root, "ai-generated", UUID(effect_id)), effect)]
-        assert owner.get(endpoint, params=effect_asset).json()["state"] == "sent"
-        assert owner.get(endpoint, params=original_asset).json() is None
-
-        queued_original = owner.post(endpoint, json=original_asset, headers=HEADERS)
-        assert queued_original.status_code == 202 and queued_original.json()["id"] != effect_print_id
-        printing.process_print_queue(settings, app.state.db)
-        assert queued_calls[1] == (queued_original.json()["id"], asset_path(settings.data_root, "originals", photo), original)
+    with TestClient(app, base_url=BASE) as single, TestClient(app, base_url=BASE) as strip:
+        session = single.post("/api/sessions", headers=HEADERS).raise_for_status().json()
+        strip_session = strip.post("/api/sessions", json={"experience": "filmstrip"},
+                                  headers=HEADERS).raise_for_status().json()
+        original = b"Unreadable fixture"
+        asset = seed_original(app, settings, session["id"], original)
+        strip_asset = seed_original(app, settings, strip_session["id"], sample_jpeg())
+        assert strip.post(STUDIO, json={"asset_id": str(strip_asset), "treatment": "classic-filter"},
+                          headers=HEADERS).status_code == 404
+        args = {"asset_id": str(asset), "treatment": "classic-filter"}
+        queued = single.post(STUDIO, json=args, headers=HEADERS).raise_for_status().json()
+        assert wait_for_result(single, asset, "classic-filter", "failed")["id"] == queued["id"]
+        assert single.get(f"{PHOTOS}/{asset}/download").content == original
+        assert single.get(f"{STUDIO}/{queued['id']}/preview").status_code == 404
+        save_original(settings.data_root, asset, sample_jpeg())
+        retry = single.post(STUDIO, json=args, headers=HEADERS)
+        assert retry.status_code == 202 and retry.json()["id"] == queued["id"]
+        assert wait_for_result(single, asset, "classic-filter", "completed")["id"] == queued["id"]
 
 
-def test_photo_effect_async_consent_and_result_isolation(settings):
-    started, release = Event(), Event()
-    uploads = []
-
-    class ConsentProbe(LocalPreviewProvider):
-        key = "consent-probe"
-        label = "Consent test"
-        sends_photo = True
-        privacy_url = None
-
-        def transform(self, jpeg, prompt):
-            uploads.append((jpeg, prompt))
-            started.set()
-            if not release.wait(5):
-                raise TimeoutError
-            return super().transform(jpeg, prompt)
-
-    app = create_app(settings, image_provider=ConsentProbe())
-    endpoint = "/api/sessions/current/photos/ai"
-    with BytesIO() as output, Image.new("RGB", (60, 40), (225, 80, 50)) as image:
-        exif = image.getexif()
-        exif[274] = 6
-        exif[270] = "private descriptor"
-        image.save(output, format="JPEG", exif=exif)
-        original = output.getvalue()
-    with TestClient(app, base_url=BASE) as owner, TestClient(app, base_url=BASE) as other:
-        session = owner.post("/api/sessions", headers=HEADERS).raise_for_status().json()
-        other.post("/api/sessions", headers=HEADERS).raise_for_status()
-        photo = seed_effect_original(app, settings, session["id"], original)
-        params = {"asset_id": str(photo)}
-        args = {**params, "template_id": "cinematic-portrait"}
-        assert owner.get(endpoint, params=params).json()["provider"]["sends_photo"] is True
-        assert owner.post(endpoint, json={**args, "consent": False}, headers=HEADERS).status_code == 422
-        assert owner.post(endpoint, json={**args, "consent": 1}, headers=HEADERS).status_code == 422
-        assert other.post(endpoint, json={**args, "consent": True}, headers=HEADERS).status_code == 404
-        assert not uploads
-        queued = owner.post(endpoint, json={**args, "consent": True}, headers=HEADERS)
-        assert queued.status_code == 202
-        job = queued.json()
-        try:
-            assert started.wait(4)
-            assert owner.get(endpoint, params=params).json()["templates"][0]["job"]["state"] == "processing"
-            assert owner.get(f"{endpoint}/{job['id']}/preview").status_code == 404
-        finally:
-            release.set()
-        deadline = monotonic() + 5
-        while monotonic() < deadline:
-            result = owner.get(endpoint, params=params).json()["templates"][0]["job"]
-            if result["state"] == "completed":
-                break
-            sleep(.05)
-        assert result["state"] == "completed"
-        assert owner.post(endpoint, json={**args, "consent": True}, headers=HEADERS).json()["id"] == job["id"]
-        assert len(uploads) == 1
-        with Image.open(BytesIO(uploads[0][0])) as cleaned:
-            assert cleaned.size == (40, 60)
-            assert len(cleaned.getexif()) == 0
-        assert "cool shadows" in uploads[0][1]
-        preview = owner.get(f"{endpoint}/{job['id']}/preview").raise_for_status()
-        download = owner.get(f"{endpoint}/{job['id']}/download").raise_for_status()
-        assert preview.content == download.content
-        assert other.get(f"{endpoint}/{job['id']}/download").status_code == 404
-        assert asset_path(settings.data_root, "originals", photo).read_bytes() == original
-        with app.state.db() as db:
-            stored = db.get(AIJob, UUID(job["id"]))
-            assert stored.sends_photo and stored.consented_at and stored.original_id == photo
-
-
-def test_disabled_effects_and_local_failure_preserve_the_original(settings):
+def test_studio_reuses_saved_classic_and_preserves_legacy_links_and_prints(settings):
     app = create_app(settings)
-    endpoint = "/api/sessions/current/photos/ai"
-    original = b"unreadable test input"
-    with TestClient(app, base_url=BASE) as owner:
+    interface = IPv4Interface("192.168.42.7/24")
+    lan_base = f"http://{interface.ip}:8001"
+    lan = create_delivery_app(settings.model_copy(update={"download_bind": interface}), app.state.db)
+    extra = token_urlsafe(32)
+    with TestClient(app, base_url=BASE) as owner, \
+            TestClient(lan, base_url=lan_base, client=("192.168.42.100", 50000)) as phone:
         session = owner.post("/api/sessions", headers=HEADERS).raise_for_status().json()
-        photo = seed_effect_original(app, settings, session["id"], original)
-        params = {"asset_id": str(photo)}
-        args = {**params, "template_id": "cinematic-portrait", "consent": True}
-        assert owner.get(endpoint, params=params).json() == {"provider": None, "templates": []}
-        assert owner.post(endpoint, json=args, headers=HEADERS).status_code == 503
-        provider = LocalPreviewProvider()
-        app.state.image_provider = provider
-        response = owner.post(endpoint, json=args, headers=HEADERS).raise_for_status().json()
-        run_job(settings, app.state.db, provider)
-        job = owner.get(endpoint, params=params).json()["templates"][0]["job"]
-        assert job["state"] == "failed"
-        assert owner.get(f"/api/sessions/current/photos/{photo}/download").content == original
-        retry = owner.post(endpoint, json=args, headers=HEADERS).raise_for_status().json()
-        assert retry["id"] == response["id"] and retry["state"] == "queued"
+        original = sample_jpeg()
+        asset = seed_original(app, settings, session["id"], original)
+        legacy = uuid4()
+        saved = render("classic-filter", 1, original, asset)
+        now = datetime.now(UTC)
+        save_jpeg(settings.data_root, "ai-generated", legacy, saved)
+        with app.state.db.begin() as db:
+            db.add(AIJob(id=legacy, original_id=asset, template_id="cinematic-portrait", provider="local-preview",
+                         prompt="Local preview", sends_photo=False, consented_at=now, state="completed",
+                         detail="Ready", updated_at=now, width=60, height=40, byte_size=len(saved)))
+            db.flush()
+            db.add(DownloadLink(digest=token_digest(extra), effect_id=legacy, expires_at=now + timedelta(minutes=3)))
+            db.add(printing.PrintJob(id=uuid4(), effect_id=legacy, printer="Epson", state="sent",
+                                     detail="Printed", created_at=now, updated_at=now))
+        options = owner.get(STUDIO, params={"asset_id": str(asset)}).raise_for_status().json()
+        result = next(option["result"] for option in options if option["id"] == "classic-filter")
+        assert result["id"] == str(legacy) and result["kind"] == "effect"
+        response = owner.post(STUDIO, json={"asset_id": str(asset), "treatment": "classic-filter"}, headers=HEADERS)
+        assert response.status_code == 200 and response.json() == result
+        assert owner.get(f"{PHOTOS}/ai/{legacy}/download").raise_for_status().content == saved
+        assert owner.get(PRINT_JOBS, params={"asset_id": str(legacy), "kind": "effect"}).json()["state"] == "sent"
+        assert phone.get(f"/d/{extra}").raise_for_status().content == saved
         owner.post("/api/sessions/current/finish", json={"state": "canceled"}, headers=HEADERS).raise_for_status()
-        run_job(settings, app.state.db, provider)
-        with app.state.db() as db:
-            assert db.get(AIJob, UUID(response["id"])).state == JobState.CANCELED
+        assert phone.get(f"/d/{extra}").status_code == 404

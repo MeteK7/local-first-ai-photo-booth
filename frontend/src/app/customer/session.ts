@@ -1,49 +1,54 @@
 import { Component, computed, inject, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { Api, CameraStatus, message, Photo, PhotoFile, Session } from '../shared/api';
-import { AiPhotoPanel } from './ai-photo';
+import { CreativeStudio } from './creative-studio';
 import { PhotoPrintAction } from './photo-print';
 import { PhoneDownloadAction } from './phone-download';
 
 @Component({
   selector: 'app-session',
-  imports: [RouterLink, AiPhotoPanel, PhotoPrintAction, PhoneDownloadAction],
+  imports: [RouterLink, CreativeStudio, PhotoPrintAction, PhoneDownloadAction],
   template: `
     <section class="panel session" aria-labelledby="session-title">
       <header class="session-header">
         <h1 id="session-title">Your session</h1>
         @if (active()) {
-          <p class="session-mode">{{ isFilmstrip() ? 'Classic filmstrip' : 'Single photo' }}</p>
+          <p class="session-mode">{{ isFilmstrip() ? 'Multi-Photo Studio · Signature Strip' : 'Single photo' }}</p>
         }
       </header>
       @if (loading()) { <p role="status">Checking your session…</p> }
       @else if (active()) {
         @if (photo(); as result) {
-          <section class="session-result" aria-labelledby="session-result-title">
-            <h2 id="session-result-title">{{ isFilmstrip() ? 'Your filmstrip' : 'Original photo' }}</h2>
-            <div class="photo-stage">
-              <img [src]="api.photoUrl(result, 'preview', experience())"
-                   [alt]="isFilmstrip() ? 'Your Classic filmstrip' : 'Your captured photo'">
-            </div>
-            <div class="actions result-actions" role="group" [attr.aria-label]="isFilmstrip() ? 'Filmstrip actions' : 'Original photo actions'">
-              <a class="primary icon-action" [href]="api.photoUrl(result, 'download', experience())"
-                 [attr.download]="isFilmstrip() ? 'classic-filmstrip.jpg' : 'photo-booth.jpg'">
-                <span class="action-icon download-icon" aria-hidden="true"></span>
-                <span>{{ isFilmstrip() ? 'Download filmstrip' : 'Download photo' }}</span>
-              </a>
-              <app-phone-download [assetId]="result.id" [kind]="isFilmstrip() ? 'filmstrip' : 'original'" [disabled]="busy()" />
-              <app-photo-print [assetId]="result.id" [kind]="isFilmstrip() ? 'filmstrip' : 'original'" [disabled]="busy()" />
-            </div>
-          </section>
-          @if (!isFilmstrip()) { <app-ai-photo [photo]="result" [sessionBusy]="busy()" /> }
+          @if (isFilmstrip()) {
+            <section class="session-result" aria-labelledby="session-result-title">
+              <h2 id="session-result-title">Your Signature Strip</h2>
+              <div class="photo-stage">
+                <img [src]="api.photoUrl(result, 'preview', 'filmstrip')" alt="Your Signature Strip composition">
+              </div>
+              <div class="actions result-actions" role="group" aria-label="Composition actions">
+                <a class="primary icon-action" [href]="api.photoUrl(result, 'download', 'filmstrip')" download>
+                  <span class="action-icon download-icon" aria-hidden="true"></span>
+                  <span>Download composition</span>
+                </a>
+                <app-phone-download [assetId]="result.id" kind="filmstrip" [disabled]="busy()" />
+                <app-photo-print [assetId]="result.id" kind="filmstrip" [disabled]="busy()" />
+              </div>
+            </section>
+          } @else {
+            <app-creative-studio [photo]="result" [sessionBusy]="busy()" />
+            <section class="ai-preview" aria-labelledby="ai-preview-heading">
+              <h2 id="ai-preview-heading">AI Preview</h2>
+              <p>Coming Soon</p>
+            </section>
+          }
         } @else {
           <div class="session-capture">
             @if (isFilmstrip() && !filmstripComplete()) {
               <p class="session-progress" role="status">Photo {{ shotsTaken() + 1 }} of {{ shotsRequired() }}</p>
             }
             @if (filmstripComplete()) {
-              <div class="camera-state" role="status">{{ busy() ? 'Creating your filmstrip…' : 'Your three photos are ready.' }}</div>
-              <button type="button" class="primary" [disabled]="busy()" (click)="retryFilmstrip()">Create filmstrip</button>
+              <div class="camera-state" role="status">{{ busy() ? 'Creating your composition…' : 'All ' + shotsRequired() + ' photos are ready.' }}</div>
+              <button type="button" class="primary" [disabled]="busy()" (click)="retryFilmstrip()">Create composition</button>
             } @else {
               @if (frameUrl(); as frame) {
                 <div class="photo-stage">
@@ -58,8 +63,11 @@ import { PhoneDownloadAction } from './phone-download';
                       [disabled]="busy() || !frameUrl() || camera()?.state !== 'ready'"
                       (click)="takePhoto()">
                 <span class="shutter-disc" aria-hidden="true"><span class="action-icon shutter-icon"></span></span>
-                <span>{{ isFilmstrip() ? (shotsTaken() ? 'Continue filmstrip' : 'Take three photos') : 'Take photo' }}</span>
+                <span>{{ isFilmstrip() ? (shotsTaken() ? 'Continue capture' : 'Take ' + shotsRequired() + ' photos') : 'Take photo' }}</span>
               </button>
+              @if (isFilmstrip() && !busy()) {
+                <p class="session-capture-note">The camera counts down before each photo.</p>
+              }
             }
           </div>
         }
@@ -95,9 +103,9 @@ export class SessionPage implements OnInit, OnDestroy {
   readonly photo = signal<PhotoFile | null>(null);
   private readonly printAction = viewChild(PhotoPrintAction);
   private readonly phoneDownload = viewChild(PhoneDownloadAction);
-  private readonly aiPanel = viewChild(AiPhotoPanel);
-  readonly printing = computed(() => this.printAction()?.pending() || this.aiPanel()?.printing() || false);
-  readonly sharing = computed(() => this.phoneDownload()?.pending() || this.aiPanel()?.sharing() || false);
+  private readonly studio = viewChild(CreativeStudio);
+  readonly printing = computed(() => this.printAction()?.pending() || this.studio()?.printing() || false);
+  readonly sharing = computed(() => this.phoneDownload()?.pending() || this.studio()?.sharing() || false);
   readonly countdown = signal(0);
   readonly capturing = signal(false);
   readonly shotsTaken = signal(0);
@@ -115,10 +123,13 @@ export class SessionPage implements OnInit, OnDestroy {
       this.active.set(await this.api.current());
     } catch (error) {
       this.error.set(message(error, 'Please try again.'));
-    } finally {
       this.loading.set(false);
+      return;
     }
-    if (!this.active() || this.stopped) return;
+    if (!this.active() || this.stopped) {
+      this.loading.set(false);
+      return;
+    }
     try {
       if (this.isFilmstrip()) {
         const progress = await this.api.filmstrip();
@@ -131,8 +142,10 @@ export class SessionPage implements OnInit, OnDestroy {
     } catch (error) {
       this.error.set(message(error, 'Could not check your saved photo. Reload to try again.'));
       return;
+    } finally {
+      this.loading.set(false);
     }
-    if (!this.photo()) {
+    if (!this.stopped && !this.photo()) {
       if (this.filmstripComplete()) await this.retryFilmstrip();
       else this.startCameraUpdate();
     }
@@ -212,7 +225,8 @@ export class SessionPage implements OnInit, OnDestroy {
       await this.cameraUpdate;
       if (this.stopped) return;
       this.requestId ??= crypto.randomUUID();
-      const captured = await this.api.capture(this.requestId);
+      const slot = this.isFilmstrip() ? this.shotsTaken() + 1 : undefined;
+      const captured = await this.api.capture(this.requestId, slot);
       this.requestId = undefined;
       this.setFrame(null);
       return captured;
@@ -227,7 +241,7 @@ export class SessionPage implements OnInit, OnDestroy {
       await new Promise(resolve => setTimeout(resolve, 150));
     }
     if (!this.stopped && !this.frameUrl()) {
-      throw new Error('Camera preview is still reconnecting. Continue the filmstrip once it returns.');
+      throw new Error('Camera preview is still reconnecting. Continue capture once it returns.');
     }
   }
 
@@ -242,7 +256,7 @@ export class SessionPage implements OnInit, OnDestroy {
     try {
       await this.renderFilmstrip();
     } catch (error) {
-      this.error.set(message(error, 'Could not create the filmstrip. Your originals are saved.'));
+      this.error.set(message(error, 'Could not create the composition. Your originals are saved.'));
     } finally {
       this.busy.set(false);
     }

@@ -43,11 +43,13 @@ describe('Session page', () => {
     });
     await Promise.resolve();
     fixture.detectChanges();
+    http.expectOne('/api/sessions/current/photos/creative?asset_id=saved-photo').flush([]);
     http.expectOne(request => request.url.endsWith('/print-jobs') && request.method === 'GET').flush(null);
     await fixture.whenStable();
     fixture.detectChanges();
     const image = fixture.nativeElement.querySelector('img') as HTMLImageElement;
     const download = fixture.nativeElement.querySelector('a[download]') as HTMLAnchorElement;
+    expect(fixture.nativeElement.querySelector('.ai-preview').textContent).toContain('Coming Soon');
     expect(image.getAttribute('src')).toBe('/api/sessions/current/photos/saved-photo/preview');
     expect(download.getAttribute('href')).toBe('/api/sessions/current/photos/saved-photo/download');
     const phoneButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>)
@@ -86,13 +88,13 @@ describe('Session page', () => {
       id: 'test-session', state: 'active', experience: 'filmstrip', started_at: date, expires_at: date, ended_at: null,
     });
     await Promise.resolve();
-    http.expectOne('/api/sessions/current/photos/filmstrip').flush({ captured: 1, required: 3, result: null });
+    http.expectOne('/api/sessions/current/photos/filmstrip').flush({ captured: 4, required: 6, result: null });
     await Promise.resolve();
     http.expectOne('/api/camera/status').flush({ state: 'unavailable', live_view: false, capture: false });
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('Photo 2 of 3');
-    expect(fixture.nativeElement.textContent).toContain('Continue filmstrip');
+    expect(fixture.nativeElement.textContent).toContain('Photo 5 of 6');
+    expect(fixture.nativeElement.textContent).toContain('Continue capture');
     http.verify();
     fixture.destroy();
   });
