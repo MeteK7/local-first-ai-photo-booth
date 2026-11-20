@@ -7,7 +7,9 @@ from threading import Lock
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
+
+from app.i18n import UiMessage, camera_messages
 
 log = logging.getLogger("uvicorn.error")
 
@@ -19,6 +21,11 @@ class CameraStatus(BaseModel):
     live_view: bool = False
     capture: bool = False
     detail: str | None = None
+
+    @computed_field
+    @property
+    def messages(self) -> list[UiMessage]:
+        return camera_messages(self.detail)
 
 
 class CameraDetails(BaseModel):

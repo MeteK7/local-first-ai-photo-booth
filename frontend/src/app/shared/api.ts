@@ -1,6 +1,7 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
+import { I18n, isUiMessage, legacyKey, UiMessage } from './i18n';
 
 export interface Session {
   id: string;
@@ -65,6 +66,10 @@ export interface CaptureDirections {
   next_countdown: number;
   transfer_note: string | null;
   manual_advance?: boolean;
+  title_key?: string;
+  introduction_key?: string;
+  prompt_keys?: string[];
+  transfer_key?: string | null;
 }
 
 export interface CompositionGeometry {
@@ -103,6 +108,7 @@ export interface CameraStatus {
   live_view: boolean;
   capture: boolean;
   detail?: string;
+  messages?: UiMessage[];
 }
 
 export interface PhotoFile {
@@ -118,6 +124,7 @@ export interface Photo extends PhotoFile {
 
 export interface Composition extends PhotoFile {
   fallback_reason?: string;
+  messages?: UiMessage[];
 }
 
 export interface PhoneLink {
@@ -130,6 +137,7 @@ export interface PrintJob {
   id: string;
   state: 'queued' | 'submitting' | 'submitted' | 'sent' | 'failed' | 'unknown';
   detail: string;
+  messages?: UiMessage[];
 }
 
 export type PhotoResultKind = 'original' | 'filmstrip' | 'effect' | 'creative';
@@ -139,6 +147,7 @@ export interface CreativeResult {
   kind: 'creative' | 'effect';
   state: 'queued' | 'processing' | 'completed' | 'failed' | 'canceled';
   detail: string;
+  messages?: UiMessage[];
 }
 
 export interface CreativeTreatment {
@@ -156,16 +165,22 @@ interface FilmstripProgress {
 
 const photos = '/api/sessions/current/photos';
 
-export function message(error: unknown, fallback: string): string {
-  if (error instanceof HttpErrorResponse && typeof error.error?.detail === 'string') {
-    return error.error.detail;
+export function message(error: unknown, fallback: string): UiMessage[] {
+  if (error instanceof HttpErrorResponse) {
+    const messages = error.error?.messages;
+    if (Array.isArray(messages) && messages.length && messages.every(isUiMessage)) return messages;
+    const legacy = error.error?.detail;
+    if (typeof legacy === 'string') return [{ key: legacyKey(legacy) ?? fallback }];
+  } else if (error instanceof Error) {
+    return [{ key: legacyKey(error.message) ?? fallback }];
   }
-  return fallback;
+  return [{ key: fallback }];
 }
 
 @Injectable({ providedIn: 'root' })
 export class Api {
   private readonly http = inject(HttpClient);
+  private readonly i18n = inject(I18n);
 
   start(experience: Experience, multiPhotoPlan?: CapturePlan) {
     return firstValueFrom(this.http.post<Session>('/api/sessions', {
@@ -186,7 +201,9 @@ export class Api {
     return firstValueFrom(this.http.post<Photo>(photos, { request_id: requestId, slot }));
   }
   filmstrip() { return firstValueFrom(this.http.get<FilmstripProgress>(`${photos}/filmstrip`)); }
-  composeFilmstrip() { return firstValueFrom(this.http.post<Composition>(`${photos}/filmstrip`, {})); }
+  composeFilmstrip() {
+    return firstValueFrom(this.http.post<Composition>(`${photos}/filmstrip`, { locale: this.i18n.locale() }));
+  }
   createPhoneLink(assetId: string, kind: PhotoResultKind) {
     return firstValueFrom(this.http.post<PhoneLink>(`${photos}/phone-links`, {
       asset_id: assetId, kind,
@@ -206,7 +223,7 @@ export class Api {
   }
   applyTreatment(photo: PhotoFile, treatment: string) {
     return firstValueFrom(this.http.post<CreativeResult>(`${photos}/creative`, {
-      asset_id: photo.id, treatment,
+      asset_id: photo.id, treatment, locale: this.i18n.locale(),
     }));
   }
   creativeUrl(result: CreativeResult, action: 'preview' | 'download') {

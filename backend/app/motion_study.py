@@ -6,9 +6,10 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Sequence
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 from app.filmstrip import FrameBox, GRID_HEIGHT, GRID_WIDTH, print_jpeg
+from app.i18n import DEFAULT_LOCALE, LOCALES, Locale, artwork_font, translate
 from app.multi_photo import MotionStudyLayout
 
 
@@ -136,19 +137,20 @@ def _place_panel(canvas: Image.Image, source: Path | Image.Image, panel: Panel, 
             canvas.paste(tile, (x, y), tile)
 
 
-def _compose(sources: Sequence[Path | Image.Image], layout: MotionStudyLayout, *, preview: bool = False) -> bytes:
+def _compose(sources: Sequence[Path | Image.Image], layout: MotionStudyLayout, locale: Locale, *,
+             preview: bool = False) -> bytes:
     panels = motion_panels(layout, len(sources))
     design = MOTION_DESIGNS[layout]
     with Image.new("RGB", (GRID_WIDTH, GRID_HEIGHT), design.paper) as canvas:
         draw = ImageDraw.Draw(canvas)
+        title = translate("artwork.motionTitle", locale)
         if layout == MotionStudyLayout.MATCH_CUT:
-            draw.text((126, 60), "MOTION STUDY", font=ImageFont.load_default(54), fill=design.ink)
+            draw.text((126, 60), title, font=artwork_font(locale, 54), fill=design.ink)
             draw.line((126, 145, 1710, 145), fill=design.rule, width=3)
             draw.line((88, 1042, 1719, 1042), fill=design.rule, width=3)
         else:
-            title = ImageFont.load_default(47)
-            index = ImageFont.load_default(42)
-            draw.text((90, 84), "MOTION STUDY", font=title, fill=design.ink)
+            index = artwork_font(locale, 42)
+            draw.text((90, 84), title, font=artwork_font(locale, 47), fill=design.ink)
             draw.text((1710, 84), f"01-{len(sources):02d}", font=index, fill=design.ink, anchor="rt")
             draw.line((90, 168, 1710, 168), fill=design.rule, width=3)
             draw.line((90, 1056, 1710, 1056), fill=design.rule, width=3)
@@ -165,12 +167,13 @@ def _compose(sources: Sequence[Path | Image.Image], layout: MotionStudyLayout, *
         return print_jpeg(canvas)
 
 
-def render_motion_study(originals: Sequence[Path], layout: MotionStudyLayout) -> bytes:
-    return _compose(originals, layout)
+def render_motion_study(originals: Sequence[Path], layout: MotionStudyLayout,
+                        locale: Locale = DEFAULT_LOCALE) -> bytes:
+    return _compose(originals, layout, locale)
 
 
-@lru_cache(maxsize=5)
-def motion_preview(layout: MotionStudyLayout, count: int) -> bytes:
+@lru_cache(maxsize=5 * len(LOCALES))
+def motion_preview(layout: MotionStudyLayout, count: int, locale: Locale = DEFAULT_LOCALE) -> bytes:
     with ExitStack() as images:
         sheet = images.enter_context(Image.open(SAMPLE_PATH, formats=("JPEG",)))
         width, height = sheet.width // 3, sheet.height // 2
@@ -178,4 +181,4 @@ def motion_preview(layout: MotionStudyLayout, count: int) -> bytes:
         for shot in SAMPLE_SHOTS[count]:
             left, top = (shot % 3) * width, (shot // 3) * height
             sources.append(images.enter_context(sheet.crop((left, top, left + width, top + height))))
-        return _compose(sources, layout, preview=True)
+        return _compose(sources, layout, locale, preview=True)

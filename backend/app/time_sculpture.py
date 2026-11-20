@@ -5,9 +5,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps, ImageStat
 
 from app.filmstrip import GRID_HEIGHT, GRID_WIDTH, cells, paste_frame, print_jpeg
+from app.i18n import DEFAULT_LOCALE, Locale, artwork_font, translate
 from app.multi_photo import SCULPTURE_POSITIONS
 
 ANALYSIS_SIZE = (360, 240)
@@ -137,19 +138,19 @@ def balance_join_tones(reference: Image.Image, sample: Image.Image, pose: Image.
         return ImageChops.add(pose, full, offset=-128)
 
 
-def pose_sequence(originals: Sequence[Path], reason: str) -> SculptureResult:
+def pose_sequence(originals: Sequence[Path], reason: str, locale: Locale = DEFAULT_LOCALE) -> SculptureResult:
     with Image.new("RGB", (GRID_WIDTH, GRID_HEIGHT), "#172233") as canvas:
         draw = ImageDraw.Draw(canvas)
-        draw.text((86, 89), "Pose sequence", font=ImageFont.load_default(70), fill="#eef3f9")
+        draw.text((86, 89), translate("artwork.poseSequence", locale), font=artwork_font(locale, 70), fill="#eef3f9")
         draw.line((86, 195, 1714, 195), fill="#a4bddd", width=2)
-        caption = ImageFont.load_default(27)
+        caption = artwork_font(locale, 27)
         for path, position, (x, width) in zip(originals, SCULPTURE_POSITIONS, cells(GRID_WIDTH, 3, 86), strict=True):
             paste_frame(canvas, path, (x, 240, width, 750), padding="#25354a")
-            draw.text((x, 1016), position, font=caption, fill="#eef3f9")
+            draw.text((x, 1016), translate(f"studio.positions.{position.lower()}", locale), font=caption, fill="#eef3f9")
         return SculptureResult(print_jpeg(canvas), reason)
 
 
-def render_time_sculpture(originals: Sequence[Path]) -> SculptureResult:
+def render_time_sculpture(originals: Sequence[Path], locale: Locale = DEFAULT_LOCALE) -> SculptureResult:
     if len(originals) != 4:
         raise ValueError("Time Sculpture requires an empty scene and three poses")
     with ExitStack() as frames:
@@ -159,7 +160,7 @@ def render_time_sculpture(originals: Sequence[Path]) -> SculptureResult:
             with Image.open(path, formats=("JPEG",)) as original:
                 ImageOps.exif_transpose(original, in_place=True)
                 if not 1.42 <= original.width / original.height <= 1.58 or source_size not in (None, original.size):
-                    return pose_sequence(originals[1:], FRAMING_NOTICE)
+                    return pose_sequence(originals[1:], FRAMING_NOTICE, locale)
                 source_size = original.size
                 with original.convert("RGB") as rgb:
                     normalized.append(frames.enter_context(ImageOps.fit(
@@ -179,7 +180,7 @@ def render_time_sculpture(originals: Sequence[Path]) -> SculptureResult:
             ):
                 reason = zone_validation(delta, changes, index)
                 if reason is not None:
-                    return pose_sequence(originals[1:], reason)
+                    return pose_sequence(originals[1:], reason, locale)
                 protected_areas.append(frames.enter_context(pose_protection(changes, index)))
 
         with plate.copy() as result:

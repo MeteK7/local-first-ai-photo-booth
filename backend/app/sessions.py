@@ -11,6 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.creative_sequences import creative_boxes
 from app.db import Base
 from app.filmstrip import dimensions, frame_boxes
+from app.i18n import DEFAULT_LOCALE, Locale, translate
 from app.motion_study import MOTION_DESIGNS, motion_preview
 from app.multi_photo import (
     DEFAULT_PLAN, LEGACY_STRIP_FILENAME, MAX_FRAMES, MIN_FRAMES, BetweenFramesPlan, CaptureDirections, CapturePlan,
@@ -120,14 +121,12 @@ def current(request: Request, booth_customer: str | None = Cookie(default=None))
 def multi_photo_studio(request: Request):
     grid_width, grid_height = dimensions(StripLayout.GRID)
     creative = [
-        (BetweenFramesPlan(experience="between-frames"), "Pair contrasting expressions or poses in a diptych or triptych.", (2, 3)),
-        (MotionStudyPlan(experience="motion-study", layout=MotionStudyLayout.ASCENDING_CUT),
-         "Follow a series of pose cues and see one movement unfold across the page.", MotionStudyLayout.ASCENDING_CUT.counts),
-        (MiniScenePlan(experience="mini-scene"), "Tell a four-photo story with a setup, action, reaction, and ending.", (4,)),
+        (BetweenFramesPlan(experience="between-frames"), (2, 3)),
+        (MotionStudyPlan(experience="motion-study", layout=MotionStudyLayout.ASCENDING_CUT), MotionStudyLayout.ASCENDING_CUT.counts),
+        (MiniScenePlan(experience="mini-scene"), (4,)),
     ]
     if request.app.state.settings.time_sculpture_enabled:
-        creative.append((TimeSculpturePlan(experience="time-sculpture"),
-                         "Use a fixed camera and clear background to put three poses in one scene.", (4,)))
+        creative.append((TimeSculpturePlan(experience="time-sculpture"), (4,)))
     return {
         "default_plan": DEFAULT_PLAN,
         "counts": list(range(MIN_FRAMES, MAX_FRAMES + 1)),
@@ -140,7 +139,7 @@ def multi_photo_studio(request: Request):
         "layouts": [
             {
                 "id": layout,
-                "name": name,
+                "name": translate(f"studio.layout.{layout}"),
                 "size": size,
                 "width": dimensions(layout)[0],
                 "height": dimensions(layout)[1],
@@ -149,33 +148,34 @@ def multi_photo_studio(request: Request):
                     for count in range(MIN_FRAMES, MAX_FRAMES + 1)
                 },
             }
-            for layout, name, size in (
-                (StripLayout.VERTICAL, "Vertical", "2 × 6 in"),
-                (StripLayout.HORIZONTAL, "Horizontal", "6 × 2 in"),
-                (StripLayout.GRID, "Grid", "6 × 4 in"),
+            for layout, size in (
+                (StripLayout.VERTICAL, "2 × 6 in"),
+                (StripLayout.HORIZONTAL, "6 × 2 in"),
+                (StripLayout.GRID, "6 × 4 in"),
             )
         ],
         "creative": [
             {
                 "default_plan": plan,
                 "name": capture_directions(plan).title,
-                "description": description,
+                "description": translate(f"studio.experience.{plan.experience}.description"),
                 "counts": counts,
                 "composition": {
                     "size": "6 × 4 in", "width": grid_width, "height": grid_height,
                     "frames": {count: creative_boxes(plan.model_copy(update={"count": count})) for count in counts},
                 },
             }
-            for plan, description, counts in creative
+            for plan, counts in creative
         ],
     }
 
 
 @router.get("/multi-photo-studio/motion-study/{layout}/{count}/preview")
-def preview_motion_layout(layout: MotionStudyLayout, count: int):
+def preview_motion_layout(layout: MotionStudyLayout, count: int, locale: Locale = DEFAULT_LOCALE):
     if count not in layout.counts:
         raise HTTPException(404, "This layout has no preview for that number of photos.")
-    return Response(content=motion_preview(layout, count), media_type="image/jpeg")
+    return Response(content=motion_preview(layout, count, locale), media_type="image/jpeg",
+                    headers={"Content-Language": locale})
 
 
 @router.post("", response_model=SessionView, status_code=201)

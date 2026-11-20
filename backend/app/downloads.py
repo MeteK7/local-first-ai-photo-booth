@@ -20,12 +20,14 @@ from qrcode.image.pil import PilImage
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.ai_photos import AIJob, JobState
 from app.config import Settings
 from app.creative import creative_owner_query
 from app.db import Base
+from app.i18n import legacy_messages, phone_locale, translate
 from app.photos import Filmstrip, OriginalPhoto, require_session, stored_file
 from app.results import RESULT_AREAS, PhotoResultKind, require_owned_result
 from app.security import issue_token, token_digest
@@ -73,6 +75,12 @@ class PhoneLink(BaseModel):
     expires_at: datetime
 
 
+def delivery_error(request: Request, status: int, key: str) -> PlainTextResponse:
+    locale = phone_locale(request.headers.get("Accept-Language", ""))
+    return PlainTextResponse(translate(key, locale), status_code=status,
+                             headers={"Content-Language": locale, "Vary": "Accept-Language"})
+
+
 def qr_image(url: str) -> str:
     with BytesIO() as output:
         qrcode.make(url, image_factory=PilImage, box_size=8).save(output, format="PNG")
@@ -115,14 +123,22 @@ def create_delivery_app(settings: Settings, sessions) -> FastAPI:
             allowed = request.client is not None and IPv4Address(request.client.host) in interface.network
         except ValueError:
             allowed = False
-        response = await call_next(request) if allowed else PlainTextResponse("Not found", status_code=404)
+        response = await call_next(request) if allowed else delivery_error(request, 404, "messages.phoneMissing")
         response.headers.update(DELIVERY_HEADERS)
         return response
 
     @app.exception_handler(SQLAlchemyError)
-    async def unavailable(_request: Request, exc: SQLAlchemyError):
+    async def unavailable(request: Request, exc: SQLAlchemyError):
         log.warning("Phone download database operation failed (%s).", type(exc).__name__)
-        return PlainTextResponse("Downloads temporarily unavailable", status_code=503)
+        return delivery_error(request, 503, "messages.phoneBusy")
+
+    @app.exception_handler(StarletteHTTPException)
+    async def localized_download_error(request: Request, exc: StarletteHTTPException):
+        fallback = "messages.phoneExpired" if request.url.path.startswith("/d/") else "messages.phoneMissing"
+        key = legacy_messages(exc.detail, fallback)[0].key
+        response = delivery_error(request, exc.status_code, key)
+        response.headers.update(exc.headers or {})
+        return response
 
     @app.api_route("/d/{token}", methods=["GET", "HEAD"])
     def get_download(token: str, request: Request):

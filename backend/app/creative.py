@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.ai_photos import AIJob
 from app.creative_renderers import CATALOG, IMAGE_LIMIT, render
 from app.db import Base
+from app.i18n import DEFAULT_LOCALE, Locale, UiMessage, legacy_messages
 from app.media import asset_path, jpeg_dimensions, save_jpeg
 from app.photos import OriginalPhoto, require_result, require_session, stored_file
 from app.sessions import BoothSession, Experience, State
@@ -55,6 +56,7 @@ class CreativeResult(Base):
     version: Mapped[int]
     state: Mapped[str] = mapped_column(String(16))
     detail: Mapped[str]
+    render_locale: Mapped[Locale] = mapped_column(String(2), server_default=DEFAULT_LOCALE)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     byte_size: Mapped[int | None]
     width: Mapped[int | None]
@@ -64,6 +66,7 @@ class CreativeResult(Base):
 class RenderRequest(BaseModel):
     asset_id: UUID
     treatment: str
+    locale: Locale = DEFAULT_LOCALE
 
 
 class RenderView(BaseModel):
@@ -71,6 +74,11 @@ class RenderView(BaseModel):
     kind: Literal["creative", "effect"]
     state: RenderState
     detail: str
+
+    @computed_field
+    @property
+    def messages(self) -> list[UiMessage]:
+        return legacy_messages(self.detail, f"messages.creative.{self.state}")
 
 
 class TreatmentView(BaseModel):
@@ -146,6 +154,7 @@ def start_render(body: RenderRequest, request: Request, response: Response,
                                     version=treatment.version)
             db.add(result)
         result.state = RenderState.QUEUED
+        result.render_locale = body.locale
         result.detail = "Waiting to prepare your photo."
         result.updated_at = datetime.now(UTC)
         return result_view(result)
@@ -212,7 +221,7 @@ def run_render(settings, sessions) -> None:
         path = asset_path(settings.data_root, "originals", result.original_id)
         if path.stat().st_size > IMAGE_LIMIT:
             raise ValueError("Original exceeds the processing limit")
-        jpeg = render(result.treatment, result.version, path.read_bytes(), result.original_id)
+        jpeg = render(result.treatment, result.version, path.read_bytes(), result.original_id, result.render_locale)
         dimensions = jpeg_dimensions(jpeg)
         save_jpeg(settings.data_root, "processed", result.id, jpeg)
         state, detail = RenderState.COMPLETED, "Your treatment is ready."

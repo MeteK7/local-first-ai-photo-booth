@@ -3,9 +3,10 @@
 from pathlib import Path
 from typing import Sequence
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 from app.filmstrip import FrameBox, GRID_HEIGHT, GRID_WIDTH, cells, paste_frame, print_jpeg
+from app.i18n import DEFAULT_LOCALE, Locale, artwork_font, translate
 from app.motion_study import motion_panels, render_motion_study
 from app.multi_photo import (
     MINI_SCENE_BEATS, BetweenFramesPlan, CreativePlan, MiniScenePlan, MotionStudyPlan, TimeSculpturePlan, capture_directions,
@@ -30,11 +31,11 @@ def creative_boxes(plan: CreativePlan) -> list[FrameBox]:
     return [*lead, (1080, 243, 640, 625)]
 
 
-def render_creative_sequence(originals: Sequence[Path], plan: CreativePlan) -> bytes:
+def render_creative_sequence(originals: Sequence[Path], plan: CreativePlan, locale: Locale = DEFAULT_LOCALE) -> bytes:
     if isinstance(plan, TimeSculpturePlan) or len(originals) != plan.count:
         raise ValueError("The number of originals must match the capture plan")
     if isinstance(plan, MotionStudyPlan) and plan.layout is not None:
-        return render_motion_study(originals, plan.layout)
+        return render_motion_study(originals, plan.layout, locale)
 
     boxes = creative_boxes(plan)
     between = isinstance(plan, BetweenFramesPlan)
@@ -45,19 +46,23 @@ def render_creative_sequence(originals: Sequence[Path], plan: CreativePlan) -> b
     padding = "#e8e8e5" if between else "#25354a"
     with Image.new("RGB", (GRID_WIDTH, GRID_HEIGHT), paper) as canvas:
         draw = ImageDraw.Draw(canvas)
-        draw.text((86, 89), capture_directions(plan).title, font=ImageFont.load_default(70), fill=ink)
+        title = translate(capture_directions(plan).title_key, locale)
+        draw.text((86, 89), title, font=artwork_font(locale, 70), fill=ink)
         draw.line((86, 195, 1714, 195), fill=accent, width=2)
         if not between and not storyboard:
             centers = [(x + w // 2, y + h // 2) for x, y, w, h in boxes]
             draw.line(centers, fill=accent, width=4, joint="curve")
             draw.line((86, 973, 1714, 973), fill=accent, width=2)
 
-        index_font = ImageFont.load_default(27)
+        index_font = artwork_font(locale, 27)
         for number, (path, box) in enumerate(zip(originals, boxes, strict=True), 1):
             x, y, width, height = box
             draw.rectangle((x - 2, y - 2, x + width + 1, y + height + 1), outline=accent, width=2)
             paste_frame(canvas, path, box, padding=padding)
-            caption = f"{number:02d} · {MINI_SCENE_BEATS[number - 1]}" if storyboard else f"{number:02d}"
+            caption = f"{number:02d}"
+            if storyboard:
+                beat = MINI_SCENE_BEATS[number - 1].lower()
+                caption += f" · {translate(f'artwork.scene.{beat}', locale)}"
             draw.text((x, y + height + 16), caption, font=index_font, fill=ink)
 
         return print_jpeg(canvas)

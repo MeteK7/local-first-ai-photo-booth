@@ -14,13 +14,14 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.config import ROOT, Settings
 from app.db import Base
+from app.i18n import UiMessage, legacy_messages
 from app.media import asset_path
 from app.multi_photo import StripLayout
 from app.photos import Filmstrip, require_session, stored_file
@@ -76,6 +77,11 @@ class PrintView(BaseModel):
     id: UUID
     state: PrintState
     detail: str
+
+    @computed_field
+    @property
+    def messages(self) -> list[UiMessage]:
+        return legacy_messages(self.detail, f"messages.print.{self.state}")
 
 
 @dataclass(frozen=True)

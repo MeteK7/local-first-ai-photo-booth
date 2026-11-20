@@ -2,11 +2,13 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
+from starlette.exceptions import HTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
 
@@ -18,6 +20,7 @@ from app.config import Settings
 from app.creative import creative_worker, router as creative_router
 from app.db import make_engine
 from app.downloads import delivery_listener, router as downloads_router
+from app.i18n import LocalizedError, UiMessage, camera_messages, legacy_messages
 from app.media import MEDIA_AREAS, prepare_storage
 from app.photos import router as photos_router
 from app.printing import print_worker, router as printing_router
@@ -27,7 +30,16 @@ log = logging.getLogger("uvicorn.error")
 LOCAL_ORIGINS = {
     f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (4200, 8000)
 }
-SCHEMA_REVISION = "20261119_10"
+SCHEMA_REVISION = "20261120_11"
+
+
+def error_response(status: int, detail: str, messages: list[UiMessage] | None = None,
+                   headers: dict[str, str] | None = None) -> JSONResponse:
+    return JSONResponse(
+        {"detail": detail, "messages": [message.model_dump(exclude_none=True)
+                                        for message in messages or legacy_messages(detail)]},
+        status_code=status, headers=headers,
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -67,7 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             origin = request.headers.get("origin")
             if (request.headers.get("x-booth-request") != "1"
                     or origin is not None and origin not in LOCAL_ORIGINS):
-                return JSONResponse({"detail": "Request origin is not allowed."}, status_code=403)
+                return error_response(403, "Request origin is not allowed.")
         response = await call_next(request)
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
@@ -75,18 +87,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         return response
 
+    @app.exception_handler(HTTPException)
+    async def localized_http_error(request: Request, exc: HTTPException):
+        if not request.url.path.startswith("/api/") or not isinstance(exc.detail, str):
+            return await http_exception_handler(request, exc)
+        messages = exc.messages if isinstance(exc, LocalizedError) else None
+        return error_response(exc.status_code, exc.detail, messages, exc.headers)
+
     @app.exception_handler(SQLAlchemyError)
     async def database_error(_request: Request, exc: SQLAlchemyError):
         log.warning("Database operation failed (%s).", type(exc).__name__)
-        return JSONResponse({"detail": "The local database is unavailable."}, status_code=503)
+        return error_response(503, "The local database is unavailable.")
 
     @app.exception_handler(RequestValidationError)
     async def bad_request(_request: Request, _exc: RequestValidationError):
-        return JSONResponse({"detail": "Check the supplied values."}, status_code=422)
+        return error_response(422, "Check the supplied values.")
 
     @app.exception_handler(CameraFailure)
     async def camera_error(_request: Request, exc: CameraFailure):
-        return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+        return error_response(exc.status, str(exc), camera_messages(str(exc)))
 
     @app.get("/api/health/live")
     def live():

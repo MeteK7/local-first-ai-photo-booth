@@ -6,7 +6,9 @@ from io import BytesIO
 from random import Random
 from uuid import UUID
 
-from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageStat
+
+from app.i18n import DEFAULT_LOCALE, Locale, artwork_font, translate
 
 IMAGE_LIMIT = 32 * 1024 * 1024
 CLASSIC_SIZE = (1536, 1536)
@@ -14,7 +16,7 @@ PRINT_LANDSCAPE = (1800, 1200)
 RESAMPLE = Image.Resampling.LANCZOS
 
 
-def classic_filter(jpeg: bytes, _seed: UUID) -> bytes:
+def classic_filter(jpeg: bytes, _seed: UUID, _locale: Locale = DEFAULT_LOCALE) -> bytes:
     # Preserve the preparation, color grade and JPEG settings of the original local preview.
     with Image.open(BytesIO(jpeg), formats=("JPEG",)) as image, BytesIO() as prepared:
         ImageOps.exif_transpose(image, in_place=True)
@@ -77,7 +79,7 @@ def paste_framed(canvas: Image.Image, source: Image.Image, box: tuple[int, int, 
         canvas.paste(framed, (x + 2, y + 2))
 
 
-def portrait_atlas(image: Image.Image, _rng: Random) -> Image.Image:
+def portrait_atlas(image: Image.Image, _rng: Random, _locale: Locale = DEFAULT_LOCALE) -> Image.Image:
     if image.height > image.width:
         size = (1200, 1800)
         main = (48, 48, 1104, 1168)
@@ -127,7 +129,7 @@ def chromatic_relief(image: Image.Image, gray: Image.Image) -> Image.Image:
         return tones.copy()
 
 
-def parallel_portrait(image: Image.Image, _rng: Random) -> Image.Image:
+def parallel_portrait(image: Image.Image, _rng: Random, _locale: Locale = DEFAULT_LOCALE) -> Image.Image:
     canvas = Image.new("RGB", PRINT_LANDSCAPE, "#13171d")
     # Both panels share the same framing. A narrow diagonal splice links the two views.
     size = (870, 1088)
@@ -143,7 +145,7 @@ def parallel_portrait(image: Image.Image, _rng: Random) -> Image.Image:
     return canvas
 
 
-def film_frame(image: Image.Image, rng: Random) -> Image.Image:
+def film_frame(image: Image.Image, rng: Random, locale: Locale = DEFAULT_LOCALE) -> Image.Image:
     width, height = 1696, 710  # 2.39:1 image window within a 6×4 matte.
     canvas = Image.new("RGB", PRINT_LANDSCAPE, "#171b20")
     with ImageOps.autocontrast(image, cutoff=.6) as contrast, contrast.convert("L") as gray:
@@ -162,17 +164,17 @@ def film_frame(image: Image.Image, rng: Random) -> Image.Image:
                         canvas.paste(still, (52, 211))
     lettering = ImageDraw.Draw(canvas)
     lettering.line(((52, 966), (1747, 966)), fill="#696c69", width=2)
-    lettering.text((52, 990), "THE FILM FRAME", fill="#e2d8c5", font=ImageFont.load_default(size=25))
+    lettering.text((52, 990), translate("artwork.filmTitle", locale), fill="#e2d8c5", font=artwork_font(locale, 25))
     return canvas
 
 
-def composed(renderer: Callable[[Image.Image, Random], Image.Image]) -> Callable[[bytes, UUID], bytes]:
-    def from_jpeg(jpeg: bytes, seed: UUID) -> bytes:
+def composed(renderer: Callable[[Image.Image, Random, Locale], Image.Image]) -> Callable[[bytes, UUID, Locale], bytes]:
+    def from_jpeg(jpeg: bytes, seed: UUID, locale: Locale) -> bytes:
         with Image.open(BytesIO(jpeg), formats=("JPEG",)) as source, BytesIO() as output:
             ImageOps.exif_transpose(source, in_place=True)
             with source.convert("RGB") as rgb:
                 rgb.thumbnail((3000, 3000), RESAMPLE)
-                with renderer(rgb, Random(seed.int)) as composition:
+                with renderer(rgb, Random(seed.int), locale) as composition:
                     composition.save(output, "JPEG", quality=94, subsampling=0, dpi=(300, 300))
             return output.getvalue()
     return from_jpeg
@@ -182,7 +184,7 @@ def composed(renderer: Callable[[Image.Image, Random], Image.Image]) -> Callable
 class Treatment:
     name: str
     description: str
-    renderer: Callable[[bytes, UUID], bytes]
+    renderer: Callable[[bytes, UUID, Locale], bytes]
     version: int = 1
 
 
@@ -198,8 +200,8 @@ CATALOG = {
 }
 
 
-def render(treatment: str, version: int, jpeg: bytes, original_id: UUID) -> bytes:
+def render(treatment: str, version: int, jpeg: bytes, original_id: UUID, locale: Locale = DEFAULT_LOCALE) -> bytes:
     recipe = CATALOG[treatment]
     if recipe.version != version:
         raise ValueError("This treatment version is unavailable")
-    return recipe.renderer(jpeg, original_id)
+    return recipe.renderer(jpeg, original_id, locale)

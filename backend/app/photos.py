@@ -8,13 +8,14 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from PIL import Image
-from pydantic import BaseModel, ConfigDict, Field, UUID4
+from pydantic import BaseModel, ConfigDict, Field, UUID4, computed_field
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, select
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.creative_sequences import render_creative_sequence
 from app.db import Base
 from app.filmstrip import dimensions, render_filmstrip
+from app.i18n import DEFAULT_LOCALE, Locale, LocalizedError, UiMessage, legacy_messages
 from app.media import asset_path, jpeg_dimensions, save_jpeg, save_original
 from app.multi_photo import MAX_FRAMES, SignatureStripPlan, TimeSculpturePlan, print_layout
 from app.sessions import BoothSession, Experience, active_session
@@ -67,6 +68,10 @@ class CaptureRequest(BaseModel):
     slot: int | None = Field(default=None, ge=1, le=MAX_FRAMES, strict=True)
 
 
+class ComposeRequest(BaseModel):
+    locale: Locale = DEFAULT_LOCALE
+
+
 class PhotoView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -85,6 +90,11 @@ class FilmstripView(BaseModel):
     width: int
     height: int
     fallback_reason: str | None = Field(default=None, exclude_if=lambda reason: reason is None)
+
+    @computed_field
+    @property
+    def messages(self) -> list[UiMessage]:
+        return legacy_messages(self.fallback_reason, "messages.sculptureFallback") if self.fallback_reason else []
 
 
 class FilmstripProgress(BaseModel):
@@ -147,8 +157,10 @@ def filmstrip_progress(request: Request, booth_customer: str | None = Cookie(def
 
 
 @router.post("/filmstrip", response_model=FilmstripView)
-def compose_filmstrip(request: Request, booth_customer: str | None = Cookie(default=None)):
+def compose_filmstrip(request: Request, body: ComposeRequest | None = None,
+                      booth_customer: str | None = Cookie(default=None)):
     root = request.app.state.settings.data_root
+    locale = body.locale if body else DEFAULT_LOCALE
     with request.app.state.db.begin() as db:
         session = filmstrip_session(db, booth_customer, lock=True)
         existing = saved_filmstrip(db, session.id)
@@ -158,16 +170,16 @@ def compose_filmstrip(request: Request, booth_customer: str | None = Cookie(defa
             plan = session.capture_plan()
             originals = strip_originals(db, session.id, plan.count)
             if len(originals) != plan.count:
-                raise HTTPException(409, f"Take all {plan.count} photos before creating the composition.")
+                raise LocalizedError(409, "messages.takeAll", count=plan.count)
             paths = [asset_path(root, "originals", photo.id) for photo in originals]
             fallback = None
             if isinstance(plan, TimeSculpturePlan):
-                sculpture = render_time_sculpture(paths)
+                sculpture = render_time_sculpture(paths, locale)
                 jpeg, fallback = sculpture.jpeg, sculpture.fallback_reason
             elif isinstance(plan, SignatureStripPlan):
                 jpeg = render_filmstrip(paths, plan)
             else:
-                jpeg = render_creative_sequence(paths, plan)
+                jpeg = render_creative_sequence(paths, plan, locale)
             layout = print_layout(plan)
             width, height = dimensions(layout)
             result = existing or Filmstrip(

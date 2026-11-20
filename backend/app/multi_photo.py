@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.i18n import translate
 
 MIN_FRAMES = 2
 MAX_FRAMES = 6
@@ -88,53 +89,53 @@ LEGACY_STRIP_FILENAME = "classic-filmstrip.jpg"
 class CaptureDirections(BaseModel):
     title: str
     introduction: str
+    title_key: str
+    introduction_key: str
     prompts: tuple[str, ...] = ()
+    prompt_keys: tuple[str, ...] = ()
     first_countdown: int = 3
     next_countdown: int = 3
     transfer_note: str | None = None
+    transfer_key: str | None = None
     manual_advance: bool = False
+
+
+def directions(experience: str, prompts: tuple[str, ...] = (), *, transfer: str | None = None,
+               first: int = 3, next_countdown: int = 3, manual: bool = False) -> CaptureDirections:
+    title = f"studio.experience.{experience}.name"
+    intro = "session.countdownHint" if experience == "signature-strip" else f"studio.experience.{experience}.intro"
+    return CaptureDirections(
+        title=translate(title), introduction=translate(intro), title_key=title, introduction_key=intro,
+        prompts=tuple(translate(key) for key in prompts), prompt_keys=prompts,
+        transfer_note=translate(transfer) if transfer else None, transfer_key=transfer,
+        first_countdown=first, next_countdown=next_countdown, manual_advance=manual,
+    )
 
 
 def capture_directions(plan: CapturePlan) -> CaptureDirections:
     if isinstance(plan, BetweenFramesPlan):
-        prompts = ("Hold a calm expression.", "Change your gaze.", "Break into a laugh.")
-        if plan.count == 2:
-            prompts = (prompts[0], prompts[2])
-        return CaptureDirections(
-            title="Between Frames",
-            introduction="Try a different expression or pose in each frame.",
-            prompts=prompts if plan.guided else (),
-        )
+        poses = ("calm", "gaze", "laugh") if plan.count == 3 else ("calm", "laugh")
+        return directions(plan.experience, tuple(f"studio.between.{pose}" for pose in poses) if plan.guided else ())
     if isinstance(plan, MotionStudyPlan):
         middle = {
-            4: ("Begin the move.", "Reach the widest part of the move."),
-            5: ("Begin the move.", "Move through the halfway point.", "Reach the widest part of the move."),
-            6: ("Begin the move.", "Move through the halfway point.", "Reach the widest part of the move.",
-                "Let the motion settle."),
+            4: ("begin", "widest"),
+            5: ("begin", "halfway", "widest"),
+            6: ("begin", "halfway", "widest", "settle"),
         }
-        return CaptureDirections(
-            title="Motion Study",
-            introduction="Pick a small move, like an arm sweep or a turn. Hold each pose until the shutter.",
-            prompts=("Set your starting pose.", *middle[plan.count], "Hold your final pose."),
-            next_countdown=2,
-            transfer_note="Saving this frame. Get ready for the next cue.",
+        return directions(
+            plan.experience, tuple(f"studio.motion.{pose}" for pose in ("start", *middle[plan.count], "final")),
+            next_countdown=2, transfer="studio.motion.transfer",
         )
     if isinstance(plan, MiniScenePlan):
-        actions = ("Show us who you are.", "Make something happen.", "Show how you feel about it.", "Give the story an ending.")
-        return CaptureDirections(
-            title="Mini Scene", introduction="Tell a short story in four photos. Start each countdown when you’re ready.",
-            prompts=tuple(f"{beat} · {action}" for beat, action in zip(MINI_SCENE_BEATS, actions, strict=True)),
-            manual_advance=True,
+        return directions(
+            plan.experience, tuple(f"studio.scene.{beat.lower()}" for beat in MINI_SCENE_BEATS), manual=True,
         )
     if isinstance(plan, TimeSculpturePlan):
-        return CaptureDirections(
-            title="Time Sculpture",
-            introduction="Keep the camera fixed. Start with an empty scene, then fit your entire pose inside each marked area.",
-            prompts=("Empty scene · Step out of frame.", *(f"{position} · Step fully inside the highlighted area."
-                       for position in SCULPTURE_POSITIONS)),
-            first_countdown=4, next_countdown=5, manual_advance=True,
+        return directions(
+            plan.experience, tuple(f"studio.sculpture.{position.lower()}" for position in ("Empty", *SCULPTURE_POSITIONS)),
+            first=4, next_countdown=5, manual=True,
         )
-    return CaptureDirections(title="Signature Strip", introduction="The camera counts down before each photo.")
+    return directions(plan.experience)
 
 
 def print_layout(plan: CapturePlan) -> StripLayout:

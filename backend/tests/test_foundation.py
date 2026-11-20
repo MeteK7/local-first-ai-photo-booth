@@ -223,6 +223,7 @@ def test_phone_downloads_expire_and_only_serve_the_linked_result(settings):
         assert 'filename="photo-booth.jpg"' in download.headers["content-disposition"]
         assert phone.head(link_path).status_code == 200
         assert phone.get(strip_path).content == composition
+        assert phone.get(strip_path, headers={"Accept-Language": "tr-TR"}).content == composition
         assert external.get(link_path, headers={"X-Forwarded-For": "192.168.42.100"}).status_code == 404
         assert phone.get(link_path, headers={"Host": "elsewhere.invalid"}).status_code == 400
         for path in ("/", "/admin", "/api/admin/overview", local_links, "/openapi.json", "/d/" + "z" * 43):
@@ -239,7 +240,12 @@ def test_phone_downloads_expire_and_only_serve_the_linked_result(settings):
             grant = db.get(DownloadLink, token_digest(token))
             assert grant.original_id == original_id and grant.filmstrip_id is None
             grant.expires_at = now - timedelta(seconds=1)
-        assert phone.get(link_path).status_code == 404
+        expired = phone.get(link_path, headers={"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"})
+        assert expired.status_code == 404 and expired.headers["content-language"] == "tr"
+        assert expired.text == "Bu indirme bağlantısı geçersiz veya süresi dolmuş."
+        default = phone.get(link_path, headers={"Accept-Language": "fr-FR"})
+        assert default.status_code == 404 and default.headers["content-language"] == "en"
+        assert default.text == "This download link is invalid or has expired."
 
 
 def test_print_job_retries_safe_failure_and_deduplicates(settings, monkeypatch):
@@ -506,14 +512,19 @@ def test_creative_results_are_local_and_deliver_the_selected_jpeg(settings, monk
         for treatment in CATALOG:
             args = {"asset_id": str(source), "treatment": treatment}
             assert other.post(STUDIO, json=args, headers=HEADERS).status_code == 404
-            queued = owner.post(STUDIO, json=args, headers=HEADERS)
+            locale = "tr" if treatment == "film-frame" else "en"
+            queued = owner.post(STUDIO, json={**args, "locale": locale}, headers=HEADERS)
             assert queued.status_code == 202 and queued.json()["state"] == "queued"
+            assert queued.json()["messages"][0]["key"] == "messages.creative.queued"
             result = wait_for_result(owner, source, treatment, "completed")
             assert result["id"] == queued.json()["id"] and result["kind"] == "creative"
             duplicate = owner.post(STUDIO, json=args, headers=HEADERS)
             assert duplicate.status_code == 200 and duplicate.json() == result
             ids.append(result["id"])
             jpeg = owner.get(f"{STUDIO}/{result['id']}/preview").raise_for_status().content
+            if treatment == "film-frame":
+                assert jpeg == render(treatment, 1, original, source, "tr")
+                assert jpeg != render(treatment, 1, original, source, "en")
             assert owner.get(f"{STUDIO}/{result['id']}/download").raise_for_status().content == jpeg
             assert other.get(f"{STUDIO}/{result['id']}/download").status_code == 404
             outputs.append(jpeg)

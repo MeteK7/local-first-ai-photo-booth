@@ -1,7 +1,9 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { provideTranslateService } from '@ngx-translate/core';
 import { describe, expect, it, vi } from 'vitest';
+import { I18n } from '../shared/i18n';
 import { CreativeStudio } from './creative-studio';
 
 const photos = '/api/sessions/current/photos';
@@ -13,7 +15,7 @@ const catalog = [
 ];
 
 async function setUp() {
-  TestBed.configureTestingModule({ providers: [provideHttpClient(), provideHttpClientTesting()] });
+  TestBed.configureTestingModule({ providers: [provideTranslateService(), provideHttpClient(), provideHttpClientTesting()] });
   const fixture = TestBed.createComponent(CreativeStudio);
   fixture.componentRef.setInput('photo', { id: 'source', width: 60, height: 40, byte_size: 100 });
   const http = TestBed.inject(HttpTestingController);
@@ -36,14 +38,14 @@ describe('Creative Studio', () => {
     expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/source/preview');
     button('The Film Frame').click();
     const film = http.expectOne(photos + '/creative');
-    expect(film.request.body).toEqual({ asset_id: 'source', treatment: 'film-frame' });
+    expect(film.request.body).toEqual({ asset_id: 'source', treatment: 'film-frame', locale: 'en' });
     fixture.detectChanges();
     expect(element.textContent).toContain('Preparing your photo');
     expect(element.querySelector('a[download]')).toBeNull();
 
     button('Parallel Portrait').click();
     const parallel = http.expectOne(photos + '/creative');
-    expect(parallel.request.body).toEqual({ asset_id: 'source', treatment: 'parallel-portrait' });
+    expect(parallel.request.body).toEqual({ asset_id: 'source', treatment: 'parallel-portrait', locale: 'en' });
     parallel.flush({ id: 'parallel', kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
     film.flush({ id: 'film', kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
     await fixture.whenStable();
@@ -87,6 +89,16 @@ describe('Creative Studio', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(element.textContent).toContain(job.detail);
+    const i18n = TestBed.inject(I18n);
+    try {
+      i18n.select('tr');
+      fixture.detectChanges();
+      expect(element.textContent).toContain('Fotoğrafınız hazırlanmak üzere sırada.');
+      expect(button('Portre Atlası').getAttribute('aria-pressed')).toBe('true');
+      http.expectNone(request => request.method === 'POST');
+    } finally {
+      i18n.select('en');
+    }
     const refreshed = fixture.componentInstance.refresh();
     http.expectOne(photos + '/creative?asset_id=source').flush([
       { ...catalog[0], result: { ...job, state: 'failed', detail: 'This treatment could not be prepared.' } },
@@ -97,7 +109,7 @@ describe('Creative Studio', () => {
     expect(element.textContent).toContain('This treatment could not be prepared.');
     button('Try again').click();
     const retry = http.expectOne(photos + '/creative');
-    expect(retry.request.body).toEqual({ asset_id: 'source', treatment: 'portrait-atlas' });
+    expect(retry.request.body).toEqual({ asset_id: 'source', treatment: 'portrait-atlas', locale: 'en' });
     retry.flush(job);
     await fixture.whenStable();
     http.verify();

@@ -82,6 +82,14 @@ Choose **Print** below the original, Multi-Photo Studio composition, or selected
 
 Set `PHOTOBOOTH_PRINTER_NAME` in the project’s `.env` to the installed Windows queue name and restart the booth. The Epson L3356 uses `EPSON L3350 Series` on the test workstation. Signature Strip uses a 2 × 6 in. target for vertical and 6 × 2 in. for horizontal. Grid and the Creative Collection use 6 × 4 in. The booth fits the target within the queue’s configured paper. See `docs/testing/multi-photo-studio.md` for the layout checks.
 
+## Language
+
+Use **English** or **Türkçe** in the header to switch on any screen. The booth remembers the last customer language in the browser. Administration has its own preference. Phone download errors follow the phone browser’s language and default to English. Newly generated compositions use the selected language when they are requested. Saved JPEGs keep their captions for preview, download, and print.
+
+Angular and FastAPI share the UTF-8 catalogs in `i18n/`. Add a new locale to both catalog registries, then supply every key with the same named placeholders. Use complete phrases for instructions and errors. Review screen fit, dates and numbers, and printed glyphs in the new language. The Python suite checks catalog key and placeholder parity.
+
+When updating an existing booth, apply the current Alembic revision before restarting FastAPI. The migration defaults existing Creative Studio records to English and leaves stored files intact.
+
 For frontend development, keep the API running and use `npm --prefix .\frontend start`. Angular proxies local API requests to port 8000. Set `PHOTOBOOTH_DATA_ROOT` to an absolute path in the local configuration to override the default `data` directory.
 
 ## Verify
