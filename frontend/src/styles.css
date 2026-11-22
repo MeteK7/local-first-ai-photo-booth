@@ -300,9 +300,15 @@ p, dt { color: var(--muted); line-height: 1.6; }
   display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
   gap: 8px; margin-bottom: 16px;
 }
-.studio-treatments .secondary[aria-pressed="true"] {
+.studio-treatments .secondary[aria-pressed="true"], .studio-treatments .studio-frame-active {
   background: var(--primary); border-color: var(--primary-border); color: var(--primary-text);
 }
+.studio-frame-toggle { gap: 8px; }
+.studio-frame-chevron {
+  width: 7px; height: 7px; flex: 0 0 7px;
+  border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.studio-frame-toggle[aria-expanded="true"] .studio-frame-chevron { transform: rotate(225deg); }
 .studio-caption :is(h3, p) { margin: 0 0 8px; }
 .studio-caption h3 { font-size: 1rem; }
 .studio-caption p { font-size: .91rem; }

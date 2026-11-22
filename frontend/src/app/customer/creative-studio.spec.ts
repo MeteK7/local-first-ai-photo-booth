@@ -12,6 +12,10 @@ const catalog = [
   { id: 'parallel-portrait', name: 'Parallel Portrait', description: 'Paired portrait.', result: null },
   { id: 'film-frame', name: 'The Film Frame', description: 'Film grain and a matte.', result: null },
   { id: 'classic-filter', name: 'Classic Filter', description: 'Warm highlights.', result: null },
+  { id: 'hazar-station-portrait', name: 'Station · Portrait', description: '', category: 'frame', result: null },
+  { id: 'hazar-station-landscape', name: 'Station · Landscape', description: '', category: 'frame', result: null },
+  { id: 'hazar-travel-portrait', name: 'Safe Travels · Portrait', description: '', category: 'frame', result: null },
+  { id: 'hazar-travel-landscape', name: 'Safe Travels · Landscape', description: '', category: 'frame', result: null },
 ];
 
 async function setUp() {
@@ -33,6 +37,43 @@ async function setUp() {
 }
 
 describe('Creative Studio', () => {
+  it('opens the four Hazar frame choices from a single button without changing the photo', async () => {
+    const { fixture, http, element, button } = await setUp();
+    const toggle = button('Hazar Frames');
+    const frames = element.querySelector<HTMLElement>('#studio-hazar-options')!;
+    expect(toggle.parentElement).toBe(button('Portrait Atlas').parentElement);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(frames.hidden).toBe(true);
+    toggle.click();
+    fixture.detectChanges();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(frames.hidden).toBe(false);
+    expect(Array.from(frames.querySelectorAll('button'), item => item.textContent.trim())).toEqual([
+      'Station · Portrait', 'Station · Landscape', 'Safe Travels · Portrait', 'Safe Travels · Landscape',
+    ]);
+    expect(button('Original').getAttribute('aria-pressed')).toBe('true');
+    http.expectNone(request => request.method === 'POST');
+    button('Safe Travels · Portrait').click();
+    const request = http.expectOne(photos + '/creative');
+    expect(request.request.body).toMatchObject({ asset_id: 'source', treatment: 'hazar-travel-portrait' });
+    request.flush({ id: 'travel', kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    http.expectOne(photos + '/print-jobs?asset_id=travel&kind=creative').flush(null);
+    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/travel/preview');
+    expect(button('Safe Travels · Portrait').getAttribute('aria-pressed')).toBe('true');
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(toggle.disabled).toBe(false);
+    });
+    toggle.click();
+    fixture.detectChanges();
+    expect(frames.hidden).toBe(true);
+    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/travel/preview');
+    http.verify();
+    fixture.destroy();
+  });
+
   it('uses the latest selection for preview, download, phone QR and printing', async () => {
     const { fixture, http, element, button } = await setUp();
     expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/source/preview');

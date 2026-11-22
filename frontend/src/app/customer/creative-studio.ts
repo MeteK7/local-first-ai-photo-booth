@@ -22,13 +22,34 @@ interface DisplayPhoto {
       <div class="studio-treatments" role="group" [attr.aria-label]="i18n.text('studio.treatments')">
         <button type="button" class="secondary" [attr.aria-pressed]="selected() === 'original'"
                 [disabled]="deliveryPending() || sessionBusy()" (click)="selectOriginal()">{{ i18n.text('studio.original') }}</button>
-        @for (item of treatments(); track item.id) {
+        @for (item of effects(); track item.id) {
           <button type="button" class="secondary" [attr.aria-pressed]="selected() === item.id"
                   [disabled]="deliveryPending() || sessionBusy()" (click)="choose(item)">
             {{ treatmentName(item) }}
           </button>
         }
+        @if (frames().length) {
+          <button type="button" class="secondary studio-frame-toggle"
+                  [class.studio-frame-active]="treatment()?.category === 'frame'"
+                  [attr.aria-expanded]="framesOpen()" aria-controls="studio-hazar-options"
+                  [disabled]="deliveryPending() || sessionBusy()" (click)="framesOpen.set(!framesOpen())">
+            {{ i18n.text('studio.hazarFrames') }}
+            <span class="studio-frame-chevron" aria-hidden="true"></span>
+          </button>
+        }
       </div>
+      @if (frames().length) {
+        <div id="studio-hazar-options" [hidden]="!framesOpen()" role="group" [attr.aria-label]="i18n.text('studio.hazarFrames')">
+          <div class="studio-treatments">
+            @for (item of frames(); track item.id) {
+              <button type="button" class="secondary" [attr.aria-pressed]="selected() === item.id"
+                      [disabled]="deliveryPending() || sessionBusy()" (click)="choose(item)">
+                {{ treatmentName(item) }}
+              </button>
+            }
+          </div>
+        </div>
+      }
       @if (catalogError(); as errors) {
         <p class="error" role="alert">{{ i18n.notices(errors) }}</p>
         <button type="button" class="secondary" (click)="refresh()">{{ i18n.text('studio.reloadTreatments') }}</button>
@@ -75,6 +96,9 @@ export class CreativeStudio implements OnInit, OnDestroy {
   readonly photo = input.required<PhotoFile>();
   readonly sessionBusy = input(false);
   readonly treatments = signal<CreativeTreatment[]>([]);
+  protected readonly effects = computed(() => this.treatments().filter(item => item.category !== 'frame'));
+  protected readonly frames = computed(() => this.treatments().filter(item => item.category === 'frame'));
+  protected readonly framesOpen = signal(false);
   readonly selected = signal('original');
   readonly catalogError = signal<UiMessage[] | null>(null);
   readonly requesting = signal<ReadonlySet<string>>(new Set());
@@ -110,12 +134,15 @@ export class CreativeStudio implements OnInit, OnDestroy {
   ngOnInit(): void { void this.refresh(); }
 
   selectOriginal(): void {
-    if (!this.sessionBusy() && !this.deliveryPending()) this.selected.set('original');
+    if (this.sessionBusy() || this.deliveryPending()) return;
+    this.selected.set('original');
+    this.framesOpen.set(false);
   }
 
   async choose(item: CreativeTreatment): Promise<void> {
     if (this.sessionBusy() || this.deliveryPending()) return;
     this.selected.set(item.id);
+    if (item.category !== 'frame') this.framesOpen.set(false);
     if (this.requesting().has(item.id) || (item.result && item.result.state !== 'failed')) return;
     this.requestErrors.update(errors => ({ ...errors, [item.id]: undefined }));
     this.requesting.update(pending => new Set([...pending, item.id]));

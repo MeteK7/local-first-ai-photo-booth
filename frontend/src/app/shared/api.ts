@@ -154,6 +154,7 @@ export interface CreativeTreatment {
   id: string;
   name: string;
   description: string;
+  category?: 'treatment' | 'frame';
   result: CreativeResult | null;
 }
 
