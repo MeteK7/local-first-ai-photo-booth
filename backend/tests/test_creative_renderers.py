@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from PIL import Image, ImageChops, ImageDraw
 
-from app.creative_renderers import ARTWORK, CATALOG, detail_regions, render, station_portrait_artwork
+from app.creative_renderers import ARTWORK, CATALOG, detail_regions, render, station_portrait_layers
 
 SEED = UUID(int=12)
 
@@ -58,7 +58,10 @@ def test_compositions_fit_photo_paper_and_strip_camera_metadata(size, orientatio
             if name != "classic-filter":
                 vertical = ((name == "portrait-atlas" and portrait)
                             or (CATALOG[name].category == "frame" and name.endswith("-portrait")))
-                expected = (1200, 1800) if vertical else (1800, 1200)
+                if name == "hazar-station-portrait":
+                    expected = (1056, 1429)
+                else:
+                    expected = (1200, 1800) if vertical else (1800, 1200)
                 assert image.size == expected and image.info["dpi"] == (300, 300)
 
 
@@ -76,27 +79,33 @@ def test_hazar_frame_shows_the_original_color_through_its_window(name):
             assert any(high - low > 32 for low, high in footer.getextrema())
 
 
-def test_vertical_station_artwork_has_one_interior_opening_and_opaque_edges():
-    with (Image.open(ARTWORK / "hazar-station-portrait.png") as source,
-          station_portrait_artwork(source) as artwork, artwork.getchannel("A") as alpha,
-          alpha.point(lambda value: 0 if value == 255 else 255) as cutout):
-        width, height = artwork.size
-        left, top, right, bottom = cutout.getbbox()
-        assert 0 < left < width // 2 < right < width
-        assert 0 < top < height // 2 < bottom < height
-        assert alpha.getpixel((width // 2, height // 2)) == 0
-        ImageDraw.floodfill(cutout, (width // 2, height // 2), 0)
-        assert cutout.getbbox() is None
+def test_vertical_station_cleans_only_the_faint_exterior_fringe():
+    with Image.open(ARTWORK / "hazar-station-portrait.png") as source:
+        artwork, opening = station_portrait_layers(source)
+        with (artwork, opening, source.convert("RGB") as before, artwork.convert("RGB") as after,
+              source.getchannel("A") as original_alpha, artwork.getchannel("A") as cleaned_alpha):
+            assert artwork.size == source.size
+            assert ImageChops.difference(before, after).getbbox() is None
+            with ImageChops.difference(original_alpha, cleaned_alpha) as removed:
+                assert 0 < removed.getextrema()[1] < 64
+            assert cleaned_alpha.getbbox()[1] > original_alpha.getbbox()[1]
+            assert cleaned_alpha.getbbox()[3] < original_alpha.getbbox()[3]
+            assert opening.getpixel((145, 700)) == opening.getpixel((940, 700)) == 255
+            assert opening.getpixel((100, 700)) == opening.getpixel((990, 700)) == 0
+            assert cleaned_alpha.getpixel((source.width // 2, source.height // 2)) == 0
 
 
-def test_vertical_station_print_reaches_both_outer_edges():
+def test_vertical_station_canvas_stops_at_the_artwork_bounds():
     original = sample((720, 480), textured=False)
     name = "hazar-station-portrait"
     with Image.open(BytesIO(render(name, CATALOG[name].version, original, SEED))) as photo:
-        for box in ((0, 850, 10, 1100), (1190, 850, 1200, 1100)):
+        assert photo.size == (1056, 1429)
+        for box in ((8, 450, 16, 1000), (1040, 450, 1048, 1000)):
+            with photo.crop(box) as outside:
+                assert outside.getextrema() == ((255, 255),) * 3
+        for box in ((0, 0, photo.width, 12), (0, photo.height - 12, photo.width, photo.height)):
             with photo.crop(box) as edge:
-                red, _, blue = edge.getextrema()
-                assert blue[0] > red[1] + 35
+                assert edge.getextrema()[0][0] < 240
 
 
 def test_detail_crops_are_distinct_and_inside_original():
