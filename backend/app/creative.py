@@ -85,6 +85,7 @@ class TreatmentView(BaseModel):
     id: str
     name: str
     description: str
+    category: Literal["treatment", "frame"]
     result: RenderView | None
 
 
@@ -123,7 +124,8 @@ def options(asset_id: UUID, request: Request, booth_customer: str | None = Cooki
             legacy = classic_result(db, asset_id, request)
             if legacy:
                 results["classic-filter"] = legacy
-        return [TreatmentView(id=key, name=item.name, description=item.description, result=results.get(key))
+        return [TreatmentView(id=key, name=item.name, description=item.description,
+                              category=item.category, result=results.get(key))
                 for key, item in CATALOG.items()]
 
 

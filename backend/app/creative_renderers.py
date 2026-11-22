@@ -2,8 +2,11 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from io import BytesIO
+from pathlib import Path
 from random import Random
+from typing import Literal
 from uuid import UUID
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageStat
@@ -13,7 +16,9 @@ from app.i18n import DEFAULT_LOCALE, Locale, artwork_font, translate
 IMAGE_LIMIT = 32 * 1024 * 1024
 CLASSIC_SIZE = (1536, 1536)
 PRINT_LANDSCAPE = (1800, 1200)
+PRINT_PORTRAIT = (1200, 1800)
 RESAMPLE = Image.Resampling.LANCZOS
+ARTWORK = Path(__file__).with_name("assets")
 
 
 def classic_filter(jpeg: bytes, _seed: UUID, _locale: Locale = DEFAULT_LOCALE) -> bytes:
@@ -81,7 +86,7 @@ def paste_framed(canvas: Image.Image, source: Image.Image, box: tuple[int, int, 
 
 def portrait_atlas(image: Image.Image, _rng: Random, _locale: Locale = DEFAULT_LOCALE) -> Image.Image:
     if image.height > image.width:
-        size = (1200, 1800)
+        size = PRINT_PORTRAIT
         main = (48, 48, 1104, 1168)
         details = ((48, 1244, 538, 508), (614, 1244, 538, 508))
     else:
@@ -168,6 +173,33 @@ def film_frame(image: Image.Image, rng: Random, locale: Locale = DEFAULT_LOCALE)
     return canvas
 
 
+def branded_frame(image: Image.Image, _rng: Random, _locale: Locale, *,
+                  artwork: str, size: tuple[int, int], flexible_rows: tuple[int, int],
+                  opening: tuple[int, int, int, int] | None = None) -> Image.Image:
+    width, height = size
+    first, last = flexible_rows
+    with Image.open(ARTWORK / f"{artwork}.png", formats=("PNG",)) as overlay:
+        scale = width / overlay.width
+        top_height = round(first * scale)
+        bottom_height = round((overlay.height - last) * scale)
+        # Fit the print by adjusting only the edges alongside the opening. Brand panels scale evenly.
+        sections = (
+            (0, first, 0, top_height),
+            (first, last, top_height, height - top_height - bottom_height),
+            (last, overlay.height, height - bottom_height, bottom_height),
+        )
+        left, top, right, bottom = opening or (0, 0, width, height)
+        # White represents bare paper where the artwork and the photo opening leave a gap.
+        with Image.new("RGBA", size, "white") as canvas:
+            with ImageOps.fit(image, (right - left, bottom - top), RESAMPLE) as photo:
+                canvas.paste(photo, (left, top))
+            for source_top, source_bottom, target_top, target_height in sections:
+                with overlay.crop((0, source_top, overlay.width, source_bottom)) as band:
+                    with band.resize((width, target_height), RESAMPLE) as fitted:
+                        canvas.alpha_composite(fitted, (0, target_top))
+            return canvas.convert("RGB")
+
+
 def composed(renderer: Callable[[Image.Image, Random, Locale], Image.Image]) -> Callable[[bytes, UUID, Locale], bytes]:
     def from_jpeg(jpeg: bytes, seed: UUID, locale: Locale) -> bytes:
         with Image.open(BytesIO(jpeg), formats=("JPEG",)) as source, BytesIO() as output:
@@ -186,6 +218,7 @@ class Treatment:
     description: str
     renderer: Callable[[bytes, UUID, Locale], bytes]
     version: int = 1
+    category: Literal["treatment", "frame"] = "treatment"
 
 
 CATALOG = {
@@ -198,6 +231,22 @@ CATALOG = {
     "classic-filter": Treatment("Classic Filter", "Warm highlights and cool shadows for a film-style finish.",
                                 classic_filter),
 }
+
+for artwork, size, flexible_rows, opening, version in (
+    ("hazar-station-portrait", PRINT_PORTRAIT, (717, 1100), (148, 285, 1053, 1550), 2),
+    ("hazar-station-landscape", PRINT_LANDSCAPE, (250, 555), None, 1),
+    ("hazar-travel-portrait", PRINT_PORTRAIT, (663, 841), None, 1),
+    ("hazar-travel-landscape", PRINT_LANDSCAPE, (470, 581), None, 1),
+):
+    key = f"studio.treatment.{artwork}"
+    CATALOG[artwork] = Treatment(
+        name=translate(f"{key}.name"),
+        description=translate(f"{key}.description"),
+        renderer=composed(partial(branded_frame, artwork=artwork, size=size, flexible_rows=flexible_rows,
+                                  opening=opening)),
+        version=version,
+        category="frame",
+    )
 
 
 def render(treatment: str, version: int, jpeg: bytes, original_id: UUID, locale: Locale = DEFAULT_LOCALE) -> bytes:

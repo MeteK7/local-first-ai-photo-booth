@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from PIL import Image, ImageChops, ImageDraw
 
-from app.creative_renderers import CATALOG, detail_regions, render
+from app.creative_renderers import ARTWORK, CATALOG, detail_regions, render
 
 SEED = UUID(int=12)
 
@@ -48,16 +48,41 @@ def test_classic_filter_matches_prior_preview_bytes():
 ])
 def test_compositions_fit_photo_paper_and_strip_camera_metadata(size, orientation, portrait):
     original = sample(size, orientation=orientation, textured=size != (24, 24))
-    variants = [render(name, 1, original, SEED) for name in CATALOG]
-    assert len(set(variants)) == 4
+    variants = [render(name, recipe.version, original, SEED) for name, recipe in CATALOG.items()]
+    assert len(set(variants)) == len(CATALOG)
     for name, jpeg in zip(CATALOG, variants, strict=True):
         with Image.open(BytesIO(jpeg)) as image:
             image.load()
             assert image.mode == "RGB"
             assert not image.getexif()
             if name != "classic-filter":
-                expected = (1200, 1800) if portrait and name == "portrait-atlas" else (1800, 1200)
+                vertical = ((name == "portrait-atlas" and portrait)
+                            or (CATALOG[name].category == "frame" and name.endswith("-portrait")))
+                expected = (1200, 1800) if vertical else (1800, 1200)
                 assert image.size == expected and image.info["dpi"] == (300, 300)
+
+
+@pytest.mark.parametrize("name", [name for name, recipe in CATALOG.items() if recipe.category == "frame"])
+def test_hazar_frame_shows_the_original_color_through_its_window(name):
+    with Image.open(ARTWORK / f"{name}.png") as artwork, artwork.getchannel("A") as alpha:
+        w, h = artwork.size
+        with alpha.crop((w * 2 // 5, h * 2 // 5, w * 3 // 5, h * 3 // 5)) as center:
+            assert center.getextrema()[1] <= 1
+    original = sample((720, 480), textured=False)
+    with Image.open(BytesIO(render(name, CATALOG[name].version, original, SEED))) as photo:
+        pixel = photo.getpixel((photo.width // 2, photo.height // 2))
+        assert all(abs(actual - expected) < 4 for actual, expected in zip(pixel, (45, 65, 77), strict=True))
+        with photo.crop((0, photo.height * 9 // 10, photo.width, photo.height)) as footer:
+            assert any(high - low > 32 for low, high in footer.getextrema())
+
+
+def test_vertical_station_leaves_paper_white_outside_both_columns():
+    original = sample((720, 480), textured=False)
+    name = "hazar-station-portrait"
+    with Image.open(BytesIO(render(name, CATALOG[name].version, original, SEED))) as photo:
+        for box in ((8, 700, 16, 1100), (1184, 700, 1192, 1100)):
+            with photo.crop(box) as outside:
+                assert outside.getextrema() == ((255, 255),) * 3
 
 
 def test_detail_crops_are_distinct_and_inside_original():

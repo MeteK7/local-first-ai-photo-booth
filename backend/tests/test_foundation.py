@@ -528,28 +528,29 @@ def test_creative_results_are_local_and_deliver_the_selected_jpeg(settings, monk
             assert owner.get(f"{STUDIO}/{result['id']}/download").raise_for_status().content == jpeg
             assert other.get(f"{STUDIO}/{result['id']}/download").status_code == 404
             outputs.append(jpeg)
-        assert len(set(ids)) == len(set(outputs)) == 4
+        assert len(set(ids)) == len(set(outputs)) == len(CATALOG)
         assert asset_path(settings.data_root, "originals", source).read_bytes() == original
 
-        selected = {"asset_id": ids[1], "kind": "creative"}
+        frame_index = list(CATALOG).index("hazar-travel-portrait")
+        selected = {"asset_id": ids[frame_index], "kind": "creative"}
         assert other.post(PHONE_LINKS, json=selected, headers=HEADERS).status_code == 404
         assert other.post(PRINT_JOBS, json=selected, headers=HEADERS).status_code == 404
         grant = owner.post(PHONE_LINKS, json=selected, headers=HEADERS).raise_for_status().json()
         path = urlsplit(grant["url"]).path
-        assert phone.get(path).raise_for_status().content == outputs[1]
+        assert phone.get(path).raise_for_status().content == outputs[frame_index]
         assert external.get(path).status_code == 404
         assert phone.get(STUDIO, params={"asset_id": source}).status_code == 404
         submitted = owner.post(PRINT_JOBS, json=selected, headers=HEADERS).raise_for_status().json()
         printing.process_print_queue(settings, app.state.db)
-        assert spool_calls == [(ids[1], outputs[1])]
+        assert spool_calls == [(ids[frame_index], outputs[frame_index])]
         assert owner.get(PRINT_JOBS, params=selected).json()["id"] == submitted["id"]
         assert owner.get(PRINT_JOBS, params={"asset_id": ids[0], "kind": "creative"}).json() is None
 
         owner.post("/api/sessions/current/finish", json={"state": "completed"}, headers=HEADERS).raise_for_status()
-        assert phone.get(path).content == outputs[1]
+        assert phone.get(path).content == outputs[frame_index]
         with app.state.db.begin() as db:
             link = db.get(DownloadLink, token_digest(path.removeprefix("/d/")))
-            assert link.creative_id == UUID(ids[1])
+            assert link.creative_id == UUID(ids[frame_index])
             link.expires_at = datetime.now(UTC) - timedelta(seconds=1)
         assert phone.get(path).status_code == 404
 
