@@ -16,6 +16,7 @@ const catalog = [
   { id: 'hazar-station-landscape', name: 'Station · Landscape', description: '', category: 'frame', result: null },
   { id: 'hazar-travel-portrait', name: 'Safe Travels · Portrait', description: '', category: 'frame', result: null },
   { id: 'hazar-travel-landscape', name: 'Safe Travels · Landscape', description: '', category: 'frame', result: null },
+  { id: 'hazar-roadside-landscape', name: 'Roadside · Landscape', description: '', category: 'frame', result: null },
 ];
 
 async function setUp() {
@@ -37,7 +38,7 @@ async function setUp() {
 }
 
 describe('Creative Studio', () => {
-  it('opens the four Hazar frame choices from a single button without changing the photo', async () => {
+  it('opens the Hazar frame choices from a single button without changing the photo', async () => {
     const { fixture, http, element, button } = await setUp();
     const toggle = button('Hazar Frames');
     const frames = element.querySelector<HTMLElement>('#studio-hazar-options')!;
@@ -50,18 +51,19 @@ describe('Creative Studio', () => {
     expect(frames.hidden).toBe(false);
     expect(Array.from(frames.querySelectorAll('button'), item => item.textContent.trim())).toEqual([
       'Station · Portrait', 'Station · Landscape', 'Safe Travels · Portrait', 'Safe Travels · Landscape',
+      'Roadside · Landscape',
     ]);
     expect(button('Original').getAttribute('aria-pressed')).toBe('true');
     http.expectNone(request => request.method === 'POST');
-    button('Safe Travels · Portrait').click();
+    button('Roadside · Landscape').click();
     const request = http.expectOne(photos + '/creative');
-    expect(request.request.body).toMatchObject({ asset_id: 'source', treatment: 'hazar-travel-portrait' });
-    request.flush({ id: 'travel', kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
+    expect(request.request.body).toMatchObject({ asset_id: 'source', treatment: 'hazar-roadside-landscape' });
+    request.flush({ id: 'roadside', kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
     await fixture.whenStable();
     fixture.detectChanges();
-    http.expectOne(photos + '/print-jobs?asset_id=travel&kind=creative').flush(null);
-    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/travel/preview');
-    expect(button('Safe Travels · Portrait').getAttribute('aria-pressed')).toBe('true');
+    http.expectOne(photos + '/print-jobs?asset_id=roadside&kind=creative').flush(null);
+    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/roadside/preview');
+    expect(button('Roadside · Landscape').getAttribute('aria-pressed')).toBe('true');
     await vi.waitFor(() => {
       fixture.detectChanges();
       expect(toggle.disabled).toBe(false);
@@ -69,7 +71,7 @@ describe('Creative Studio', () => {
     toggle.click();
     fixture.detectChanges();
     expect(frames.hidden).toBe(true);
-    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/travel/preview');
+    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/roadside/preview');
     http.verify();
     fixture.destroy();
   });

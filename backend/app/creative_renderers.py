@@ -173,12 +173,41 @@ def film_frame(image: Image.Image, rng: Random, locale: Locale = DEFAULT_LOCALE)
     return canvas
 
 
+def station_portrait_artwork(source: Image.Image) -> Image.Image:
+    # Crop to the station's posts. Fit the outer bevels of the canopy and base
+    # to that width while retaining the inner edges and the branding.
+    left_edge, left_join, right_join, right_edge = 64, 125, 966, 1024
+    with source.crop((0, 20, source.width, 1434)) as trimmed, trimmed.getchannel("A") as alpha:
+        artwork = trimmed.crop((left_edge, 0, right_edge, trimmed.height))
+        with alpha.point(lambda value: 255 if value >= 245 else 0) as solid:
+            for y in range(artwork.height):
+                with solid.crop((0, y, trimmed.width, y + 1)) as row:
+                    left, _, right, _ = row.getbbox()
+                for start, end, offset, width in (
+                    (left, left_join, 0, left_join - left_edge),
+                    (right_join, right, right_join - left_edge, right_edge - right_join),
+                ):
+                    with trimmed.crop((start, y, end, y + 1)) as strip:
+                        with strip.resize((width, 1), RESAMPLE) as edge:
+                            artwork.paste(edge, (offset, y))
+
+    with artwork.getchannel("A") as alpha, alpha.point(lambda value: 255 if value >= 245 else 0) as solid:
+        # Keep the source's soft cutout only where it connects to the central opening.
+        ImageDraw.floodfill(solid, (artwork.width // 2, artwork.height // 2), 128)
+        with solid.point(lambda value: 0 if value == 128 else 255) as outside:
+            alpha.paste(255, mask=outside)
+            artwork.putalpha(alpha)
+    return artwork
+
+
 def branded_frame(image: Image.Image, _rng: Random, _locale: Locale, *,
                   artwork: str, size: tuple[int, int], flexible_rows: tuple[int, int],
-                  opening: tuple[int, int, int, int] | None = None) -> Image.Image:
+                  prepare: Callable[[Image.Image], Image.Image] | None = None) -> Image.Image:
     width, height = size
     first, last = flexible_rows
-    with Image.open(ARTWORK / f"{artwork}.png", formats=("PNG",)) as overlay:
+    with Image.open(ARTWORK / f"{artwork}.png", formats=("PNG",)) as source, (
+        prepare(source) if prepare else source.copy()
+    ) as overlay:
         scale = width / overlay.width
         top_height = round(first * scale)
         bottom_height = round((overlay.height - last) * scale)
@@ -188,15 +217,18 @@ def branded_frame(image: Image.Image, _rng: Random, _locale: Locale, *,
             (first, last, top_height, height - top_height - bottom_height),
             (last, overlay.height, height - bottom_height, bottom_height),
         )
-        left, top, right, bottom = opening or (0, 0, width, height)
-        # White represents bare paper where the artwork and the photo opening leave a gap.
-        with Image.new("RGBA", size, "white") as canvas:
-            with ImageOps.fit(image, (right - left, bottom - top), RESAMPLE) as photo:
-                canvas.paste(photo, (left, top))
+        with Image.new("RGBA", size) as frame, Image.new("RGBA", size) as canvas:
             for source_top, source_bottom, target_top, target_height in sections:
                 with overlay.crop((0, source_top, overlay.width, source_bottom)) as band:
                     with band.resize((width, target_height), RESAMPLE) as fitted:
-                        canvas.alpha_composite(fitted, (0, target_top))
+                        frame.paste(fitted, (0, target_top))
+            left, top, right, bottom = (0, 0, width, height)
+            if prepare:
+                with frame.getchannel("A") as alpha, ImageChops.invert(alpha) as opening:
+                    left, top, right, bottom = opening.getbbox()
+            with ImageOps.fit(image, (right - left, bottom - top), RESAMPLE) as photo:
+                canvas.paste(photo, (left, top))
+            canvas.alpha_composite(frame)
             return canvas.convert("RGB")
 
 
@@ -232,18 +264,19 @@ CATALOG = {
                                 classic_filter),
 }
 
-for artwork, size, flexible_rows, opening, version in (
-    ("hazar-station-portrait", PRINT_PORTRAIT, (717, 1100), (148, 285, 1053, 1550), 2),
+for artwork, size, flexible_rows, prepare, version in (
+    ("hazar-station-portrait", PRINT_PORTRAIT, (697, 1080), station_portrait_artwork, 3),
     ("hazar-station-landscape", PRINT_LANDSCAPE, (250, 555), None, 1),
     ("hazar-travel-portrait", PRINT_PORTRAIT, (663, 841), None, 1),
     ("hazar-travel-landscape", PRINT_LANDSCAPE, (470, 581), None, 1),
+    ("hazar-roadside-landscape", PRINT_LANDSCAPE, (280, 545), None, 1),
 ):
     key = f"studio.treatment.{artwork}"
     CATALOG[artwork] = Treatment(
         name=translate(f"{key}.name"),
         description=translate(f"{key}.description"),
         renderer=composed(partial(branded_frame, artwork=artwork, size=size, flexible_rows=flexible_rows,
-                                  opening=opening)),
+                                  prepare=prepare)),
         version=version,
         category="frame",
     )
