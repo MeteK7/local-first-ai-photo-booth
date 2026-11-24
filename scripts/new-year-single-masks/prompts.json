@@ -1,0 +1,22 @@
+{
+  "tool": "Built-in image_gen",
+  "use_case": "background-extraction",
+  "method": "Bright Blue and Vibrant Celebration use generated alpha with original supplied RGB pixels. Cozy Winter uses the original PNG unchanged, including its native soft alpha gradients. See prepare-new-year-single.py.",
+  "edits": [
+    {
+      "artwork": "new-year-bright-blue-landscape",
+      "source": "Bright Blue New Year Photo Frame.png",
+      "prompt": "Use case: background-extraction. Edit target: the supplied 1536x1024 New Year photo frame. Create a production transparent PNG overlay. Make ONLY the large rounded rectangular photo window on the right, removing ALL printed checkerboard squares fully transparent edge-to-edge inside its frame. The whole photo aperture must be a clean alpha-zero cutout including close to its inner boundary, with crisp antialiased contours. Every pixel outside the photo aperture must remain opaque: retain original light backdrop, all artwork, the Happy New Year 2027 lettering, colors, decorations, size, exact composition, border curves and perspective unchanged. Do not invent, redraw, shift or crop any artwork. Do not replace the window with white, gray, black or a checkerboard: it must be genuinely transparent. Preserve the entire canvas."
+    },
+    {
+      "artwork": "new-year-vibrant-2027-landscape",
+      "source": "Vibrant 2027 New Year Celebration Frame.png",
+      "prompt": "Use case: background-extraction. Edit target: the supplied 1536x1024 New Year photo frame. Create a production transparent PNG overlay. Make ONLY the large rounded rectangular photo window on the right, removing ALL dark black/gray placeholder fill fully transparent edge-to-edge inside its frame. The whole photo aperture must be a clean alpha-zero cutout including close to its inner boundary, with crisp antialiased contours. Every pixel outside the photo aperture must remain opaque: retain original light backdrop, all artwork, the Happy New Year 2027 lettering, colors, decorations, size, exact composition, border curves and perspective unchanged. Do not invent, redraw, shift or crop any artwork. Do not replace the window with white, gray, black or a checkerboard: it must be genuinely transparent. Preserve the entire canvas."
+    },
+    {
+      "artwork": "new-year-cozy-winter-landscape",
+      "source": "Happy New Year 2027 Frame.png",
+      "method": "Original supplied RGBA PNG copied byte-for-byte; original alpha channel saved as the reusable mask. No image generation, alpha cleanup, thresholding or glow removal is applied."
+    }
+  ]
+}
