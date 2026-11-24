@@ -20,11 +20,14 @@ from qrcode.image.pil import PilImage
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, delete, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.ai_photos import AIJob, JobState
 from app.config import Settings
+from app.creative import creative_owner_query
 from app.db import Base
+from app.i18n import legacy_messages, phone_locale, translate
 from app.photos import Filmstrip, OriginalPhoto, require_session, stored_file
 from app.results import RESULT_AREAS, PhotoResultKind, require_owned_result
 from app.security import issue_token, token_digest
@@ -41,21 +44,23 @@ DELIVERY_HEADERS = {
 }
 FILENAMES: dict[PhotoResultKind, str] = {
     "original": "photo-booth.jpg",
-    "filmstrip": "classic-filmstrip.jpg",
     "effect": "photo-booth-effect.jpg",
+    "creative": "creative-studio.jpg",
 }
 
 
 class DownloadLink(Base):
     __tablename__ = "download_links"
     __table_args__ = (
-        CheckConstraint("num_nonnulls(original_id, filmstrip_id, effect_id) = 1", name="download_link_one_asset"),
+        CheckConstraint("num_nonnulls(original_id, filmstrip_id, effect_id, creative_id) = 1",
+                        name="download_link_one_asset"),
     )
 
     digest: Mapped[str] = mapped_column(String(64), primary_key=True)
     original_id: Mapped[UUID | None] = mapped_column(ForeignKey("original_photos.id", ondelete="CASCADE"))
     filmstrip_id: Mapped[UUID | None] = mapped_column(ForeignKey("filmstrips.id", ondelete="CASCADE"))
     effect_id: Mapped[UUID | None] = mapped_column(ForeignKey("ai_jobs.id", ondelete="CASCADE"))
+    creative_id: Mapped[UUID | None] = mapped_column(ForeignKey("creative_results.id", ondelete="CASCADE"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
@@ -68,6 +73,12 @@ class PhoneLink(BaseModel):
     url: str
     qr_image: str
     expires_at: datetime
+
+
+def delivery_error(request: Request, status: int, key: str) -> PlainTextResponse:
+    locale = phone_locale(request.headers.get("Accept-Language", ""))
+    return PlainTextResponse(translate(key, locale), status_code=status,
+                             headers={"Content-Language": locale, "Vary": "Accept-Language"})
 
 
 def qr_image(url: str) -> str:
@@ -93,7 +104,8 @@ def create_phone_link(body: LinkRequest, request: Request, booth_customer: str |
         db.add(DownloadLink(digest=token_digest(token), expires_at=expires_at,
                             original_id=asset if body.kind == "original" else None,
                             filmstrip_id=asset if body.kind == "filmstrip" else None,
-                            effect_id=asset if body.kind == "effect" else None))
+                            effect_id=asset if body.kind == "effect" else None,
+                            creative_id=asset if body.kind == "creative" else None))
         return PhoneLink(url=url, qr_image=qr_image(url), expires_at=expires_at)
 
 
@@ -111,14 +123,22 @@ def create_delivery_app(settings: Settings, sessions) -> FastAPI:
             allowed = request.client is not None and IPv4Address(request.client.host) in interface.network
         except ValueError:
             allowed = False
-        response = await call_next(request) if allowed else PlainTextResponse("Not found", status_code=404)
+        response = await call_next(request) if allowed else delivery_error(request, 404, "messages.phoneMissing")
         response.headers.update(DELIVERY_HEADERS)
         return response
 
     @app.exception_handler(SQLAlchemyError)
-    async def unavailable(_request: Request, exc: SQLAlchemyError):
+    async def unavailable(request: Request, exc: SQLAlchemyError):
         log.warning("Phone download database operation failed (%s).", type(exc).__name__)
-        return PlainTextResponse("Downloads temporarily unavailable", status_code=503)
+        return delivery_error(request, 503, "messages.phoneBusy")
+
+    @app.exception_handler(StarletteHTTPException)
+    async def localized_download_error(request: Request, exc: StarletteHTTPException):
+        fallback = "messages.phoneExpired" if request.url.path.startswith("/d/") else "messages.phoneMissing"
+        key = legacy_messages(exc.detail, fallback)[0].key
+        response = delivery_error(request, exc.status_code, key)
+        response.headers.update(exc.headers or {})
+        return response
 
     @app.api_route("/d/{token}", methods=["GET", "HEAD"])
     def get_download(token: str, request: Request):
@@ -129,7 +149,11 @@ def create_delivery_app(settings: Settings, sessions) -> FastAPI:
             link = db.get(DownloadLink, token_digest(token))
             if link is None or link.expires_at <= datetime.now(UTC):
                 raise HTTPException(404, unavailable_link)
-            if link.effect_id is not None:
+            strip = None
+            if link.creative_id is not None:
+                kind, asset_id = "creative", link.creative_id
+                owner_id = db.scalar(creative_owner_query(asset_id))
+            elif link.effect_id is not None:
                 kind, asset_id = "effect", link.effect_id
                 owner_id = db.scalar(select(OriginalPhoto.session_id).join(
                     AIJob, AIJob.original_id == OriginalPhoto.id,
@@ -139,12 +163,14 @@ def create_delivery_app(settings: Settings, sessions) -> FastAPI:
                 owner_id = db.scalar(select(OriginalPhoto.session_id).where(OriginalPhoto.id == asset_id))
             else:
                 kind, asset_id = "filmstrip", link.filmstrip_id
-                owner_id = db.scalar(select(Filmstrip.session_id).where(Filmstrip.id == asset_id))
+                strip = db.get(Filmstrip, asset_id)
+                owner_id = strip.session_id if strip is not None else None
             owner = db.get(BoothSession, owner_id) if owner_id is not None else None
             if owner is None or owner.state == State.CANCELED:
                 raise HTTPException(404, unavailable_link)
             path = stored_file(request, RESULT_AREAS[kind], asset_id)
-        return FileResponse(path, media_type="image/jpeg", filename=FILENAMES[kind], headers=DELIVERY_HEADERS)
+            filename = strip.filename(owner) if strip is not None else FILENAMES[kind]
+        return FileResponse(path, media_type="image/jpeg", filename=filename, headers=DELIVERY_HEADERS)
 
     return app
 

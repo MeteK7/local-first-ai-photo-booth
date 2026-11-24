@@ -1,6 +1,6 @@
 # Local Photo Booth
 
-The photo booth runs Angular, FastAPI and PostgreSQL on the booth computer. The Windows prototype connects to a physical Nikon D5600 through Windows Portable Devices and offers a single photo or a three-shot Classic filmstrip.
+The photo booth runs Angular, FastAPI and PostgreSQL on the booth computer. The Windows prototype connects to a physical Nikon D5600 through Windows Portable Devices and offers Single Photo and Multi-Photo Studio.
 
 Run the commands below from `C:\Projects\local-first-ai-photo-booth` in PowerShell. Use x64 Python 3.15. The project environment was verified with Python 3.15.2. The application requires a running local PostgreSQL server.
 
@@ -56,19 +56,21 @@ Open http://127.0.0.1:8000/ for the booth or http://127.0.0.1:8000/admin for adm
 Use a charged battery and connect the D5600 directly to a Windows USB port using a data cable. Extend a retractable lens and set the camera’s mode dial to P, A, S, or M. Insert a writable SD card, select single-shot release and Large JPEG, and close other camera-control applications.
 
 - **Single photo** takes one picture. Use **Download photo** before finishing the session.
-- **Classic filmstrip** takes three pictures with a countdown before each shot. If interrupted, reopen the active session to continue from the saved photo count. Download the 600 × 1800 filmstrip before finishing the session.
+- **Multi-Photo Studio** opens **Signature Strip** in the Classic Collection. Choose 2–6 photos and a vertical, horizontal, or grid layout. The Creative Collection offers **Between Frames** for two or three contrasting portraits, **Motion Study** for guided poses in three editorial layouts, and **Mini Scene** for a four-photo storyboard. In Motion Study, **Contact Stack** and **Match Cut** take four photos, and **Ascending Cut** takes four to six. Choose **Continue to camera** to start. Reopen an interrupted session to continue from its saved photos. The finished composition can be previewed, downloaded, sent to a phone, or printed.
+
+**Time Sculpture** is available for fixed-camera setups. Set `PHOTOBOOTH_TIME_SCULPTURE_ENABLED=1` in the project’s `.env` and restart the booth. Use an evenly lit, clear background, fixed landscape framing, and fixed exposure, focus, and white balance. Capture the empty scene, then place the same subject fully inside each marked area in turn. If the scene fails the compositing checks, the booth presents the three poses as a sequence.
 
 The D5600 saves each exposure on its SD card. The booth copies each original JPEG to the local originals folder and saves the composed filmstrip separately.
 
-For a camera-free booth check, set `PHOTOBOOTH_CAMERA_ENABLED=0` for the server process. See `docs/testing/stage2-d5600.md` for camera diagnostics and `docs/testing/stage3.md` for the Epson test and the Classic filmstrip workflow.
+For a camera-free booth check, set `PHOTOBOOTH_CAMERA_ENABLED=0` for the server process. See `docs/testing/stage2-d5600.md` for camera diagnostics and `docs/testing/multi-photo-studio.md` for Signature Strip verification.
 
-## Try the local test effect
+## Use Creative Studio
 
-Set `PHOTOBOOTH_AI_MODE=preview` in `.env`, apply the database migrations, and restart the booth. Take a **Single photo**, open **AI photo preview** beneath the result, check the consent box, and choose **Create test image**. Use **Download effect** for the color-graded JPEG and **Download photo** for the original. Processing stays on the booth computer. See `docs/testing/stage6-ai-preview.md` for template configuration and verification.
+Take a **Single photo** and choose **Portrait Atlas**, **Parallel Portrait**, **The Film Frame**, or **Classic Filter** in **Creative Studio**. The booth renders each treatment locally from the same original. Choose **Original** to return to the camera JPEG. The download and print controls apply to the version in the preview. **AI Preview** shows **Coming Soon**. See `docs/testing/creative-studio.md` for the local rendering and verification details.
 
 ## Download on a phone
 
-Choose **Download on phone** on a photo or filmstrip result, or **Download effect on phone** below the processed image. Scan the QR code with a phone on the same Wi-Fi. Each code downloads the version shown above it. A code expires after 10 minutes by default. Finishing the session keeps the link usable until expiry. Canceling the session invalidates the link.
+Choose **Download on phone** below the original, Multi-Photo Studio composition, or selected Creative Studio treatment. Scan the QR code with a phone on the same Wi-Fi. Each code downloads the version selected when the code was issued. A code expires after 10 minutes by default. Finishing the session keeps the link usable until expiry. Canceling the session invalidates the link.
 
 Set `PHOTOBOOTH_DOWNLOAD_BIND` in the project’s `.env` to the booth’s private IPv4 address and subnet prefix, such as `192.168.1.20/24`. Restart the booth after changing it. The download listener defaults to port 8001. The booth and admin interface use loopback port 8000.
 
@@ -76,9 +78,17 @@ Set `PHOTOBOOTH_DOWNLOAD_TTL_MINUTES` to adjust expiry, or `PHOTOBOOTH_DOWNLOAD_
 
 ## Print a result
 
-Choose **Print** on a photo or filmstrip result, or **Print effect** under the processed preview. The booth sends one copy of the selected version to the local Windows printer and shows the job status. A retry appears when the booth can confirm the job failed before it was submitted. If Windows reports an uncertain result, check the output tray or the Windows queue.
+Choose **Print** below the original, Multi-Photo Studio composition, or selected Creative Studio treatment. The booth sends one copy of the selected version to the local Windows printer and shows the job status. A retry appears when the booth can confirm the job failed before it was submitted. If Windows reports an uncertain result, check the output tray or the Windows queue.
 
-Set `PHOTOBOOTH_PRINTER_NAME` in the project’s `.env` to the installed Windows queue name and restart the booth. The Epson L3356 uses `EPSON L3350 Series` on the test workstation. The booth fits a photo into a 6 × 4 in. area and a filmstrip into a 2 × 6 in. portrait area. It uses the queue’s configured paper size. See `docs/testing/stage5-printing.md` for details.
+Set `PHOTOBOOTH_PRINTER_NAME` in the project’s `.env` to the installed Windows queue name and restart the booth. The Epson L3356 uses `EPSON L3350 Series` on the test workstation. Signature Strip uses a 2 × 6 in. target for vertical and 6 × 2 in. for horizontal. Grid and the Creative Collection use 6 × 4 in. The booth fits the target within the queue’s configured paper. See `docs/testing/multi-photo-studio.md` for the layout checks.
+
+## Language
+
+Use **English** or **Türkçe** in the header to switch on any screen. The booth remembers the last customer language in the browser. Administration has its own preference. Phone download errors follow the phone browser’s language and default to English. Newly generated compositions use the selected language when they are requested. Saved JPEGs keep their captions for preview, download, and print.
+
+Angular and FastAPI share the UTF-8 catalogs in `i18n/`. Add a new locale to both catalog registries, then supply every key with the same named placeholders. Use complete phrases for instructions and errors. Review screen fit, dates and numbers, and printed glyphs in the new language. The Python suite checks catalog key and placeholder parity.
+
+When updating an existing booth, apply the current Alembic revision before restarting FastAPI. The migration defaults existing Creative Studio records to English and leaves stored files intact.
 
 For frontend development, keep the API running and use `npm --prefix .\frontend start`. Angular proxies local API requests to port 8000. Set `PHOTOBOOTH_DATA_ROOT` to an absolute path in the local configuration to override the default `data` directory.
 

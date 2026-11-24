@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory)][ValidateSet('Submit','Status')][string]$Action,
     [Parameter(Mandatory)][string]$Printer,
     [Parameter(Mandatory)][string]$Document,
-    [ValidateSet('Photo','Filmstrip')][string]$Layout = 'Photo',
+    [ValidateSet('Photo','Filmstrip','HorizontalStrip')][string]$Layout = 'Photo',
     [string]$ImagePath
 )
 
@@ -82,9 +82,9 @@ try {
     }
     $print.PrinterSettings.Copies = 1
     $print.PrintController = New-Object System.Drawing.Printing.StandardPrintController
-    $print.DefaultPageSettings.Landscape = $Layout -eq 'Photo' -and $image.Width -gt $image.Height
+    $print.DefaultPageSettings.Landscape = $Layout -eq 'HorizontalStrip' -or ($Layout -eq 'Photo' -and $image.Width -gt $image.Height)
     $targetWidth = if ($Layout -eq 'Filmstrip') { 200 } elseif ($print.DefaultPageSettings.Landscape) { 600 } else { 400 }
-    $targetHeight = if ($Layout -eq 'Filmstrip' -or -not $print.DefaultPageSettings.Landscape) { 600 } else { 400 }
+    $targetHeight = if ($Layout -eq 'HorizontalStrip') { 200 } elseif ($print.DefaultPageSettings.Landscape) { 400 } else { 600 }
     $print.add_PrintPage({
         param($sender, $event)
         $clip = $event.Graphics.VisibleClipBounds

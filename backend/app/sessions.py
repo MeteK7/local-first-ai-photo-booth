@@ -3,16 +3,26 @@ from enum import StrEnum
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter, model_validator
 from sqlalchemy import CheckConstraint, DateTime, String, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.creative_sequences import creative_boxes
 from app.db import Base
+from app.filmstrip import dimensions, frame_boxes
+from app.i18n import DEFAULT_LOCALE, Locale, translate
+from app.motion_study import MOTION_DESIGNS, motion_preview
+from app.multi_photo import (
+    DEFAULT_PLAN, LEGACY_STRIP_FILENAME, MAX_FRAMES, MIN_FRAMES, BetweenFramesPlan, CaptureDirections, CapturePlan,
+    MiniScenePlan, MotionStudyLayout, MotionStudyPlan, SignatureStripPlan, StripLayout, TimeSculpturePlan, capture_directions,
+)
 from app.security import issue_token, token_digest
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 COOKIE = "booth_customer"
 LIFETIME = timedelta(minutes=30)
+PLAN_ADAPTER = TypeAdapter(CapturePlan)
 
 
 class State(StrEnum):
@@ -32,15 +42,28 @@ class BoothSession(Base):
         CheckConstraint("state IN ('active', 'completed', 'canceled')", name="session_state"),
         CheckConstraint("(state = 'active') = (ended_at IS NULL)", name="session_end"),
         CheckConstraint("experience IN ('single', 'filmstrip')", name="session_experience"),
+        CheckConstraint("multi_photo_plan IS NULL OR experience = 'filmstrip'", name="session_multi_photo_plan"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     access_digest: Mapped[str] = mapped_column(String(64), unique=True)
     state: Mapped[str] = mapped_column(String(12))
     experience: Mapped[str] = mapped_column(String(12), server_default="single")
+    multi_photo_plan: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    def capture_plan(self) -> CapturePlan:
+        return DEFAULT_PLAN if self.multi_photo_plan is None else PLAN_ADAPTER.validate_python(self.multi_photo_plan)
+
+    @property
+    def studio_directions(self) -> CaptureDirections | None:
+        return capture_directions(self.capture_plan()) if self.experience == Experience.FILMSTRIP else None
+
+    @property
+    def composition_filename(self) -> str:
+        return LEGACY_STRIP_FILENAME if self.multi_photo_plan is None else f"{self.capture_plan().experience}.jpg"
 
     def finish(self, target: State, now: datetime) -> None:
         if self.state != State.ACTIVE or target not in (State.COMPLETED, State.CANCELED):
@@ -55,6 +78,8 @@ class SessionView(BaseModel):
     id: UUID
     state: State
     experience: Experience
+    multi_photo_plan: CapturePlan | None
+    studio_directions: CaptureDirections | None
     started_at: datetime
     expires_at: datetime
     ended_at: datetime | None
@@ -66,6 +91,13 @@ class FinishRequest(BaseModel):
 
 class StartRequest(BaseModel):
     experience: Experience = Experience.SINGLE
+    multi_photo_plan: CapturePlan | None = None
+
+    @model_validator(mode="after")
+    def validate_experience(self):
+        if self.multi_photo_plan is not None and self.experience != Experience.FILMSTRIP:
+            raise ValueError("A capture plan requires a Multi-Photo Studio session.")
+        return self
 
 
 def active_session(db, token: str | None, now: datetime, *, lock: bool = False):
@@ -85,6 +117,67 @@ def current(request: Request, booth_customer: str | None = Cookie(default=None))
         return active_session(db, booth_customer, datetime.now(UTC))
 
 
+@router.get("/multi-photo-studio")
+def multi_photo_studio(request: Request):
+    grid_width, grid_height = dimensions(StripLayout.GRID)
+    creative = [
+        (BetweenFramesPlan(experience="between-frames"), (2, 3)),
+        (MotionStudyPlan(experience="motion-study", layout=MotionStudyLayout.ASCENDING_CUT), MotionStudyLayout.ASCENDING_CUT.counts),
+        (MiniScenePlan(experience="mini-scene"), (4,)),
+    ]
+    if request.app.state.settings.time_sculpture_enabled:
+        creative.append((TimeSculpturePlan(experience="time-sculpture"), (4,)))
+    return {
+        "default_plan": DEFAULT_PLAN,
+        "counts": list(range(MIN_FRAMES, MAX_FRAMES + 1)),
+        "motion_layouts": [
+            {"id": layout, "name": design.name, "description": design.description, "counts": layout.counts,
+             "previews": {count: f"/api/sessions/multi-photo-studio/motion-study/{layout}/{count}/preview"
+                          for count in layout.counts}}
+            for layout, design in MOTION_DESIGNS.items()
+        ],
+        "layouts": [
+            {
+                "id": layout,
+                "name": translate(f"studio.layout.{layout}"),
+                "size": size,
+                "width": dimensions(layout)[0],
+                "height": dimensions(layout)[1],
+                "frames": {
+                    count: frame_boxes(SignatureStripPlan(count=count, layout=layout))
+                    for count in range(MIN_FRAMES, MAX_FRAMES + 1)
+                },
+            }
+            for layout, size in (
+                (StripLayout.VERTICAL, "2 × 6 in"),
+                (StripLayout.HORIZONTAL, "6 × 2 in"),
+                (StripLayout.GRID, "6 × 4 in"),
+            )
+        ],
+        "creative": [
+            {
+                "default_plan": plan,
+                "name": capture_directions(plan).title,
+                "description": translate(f"studio.experience.{plan.experience}.description"),
+                "counts": counts,
+                "composition": {
+                    "size": "6 × 4 in", "width": grid_width, "height": grid_height,
+                    "frames": {count: creative_boxes(plan.model_copy(update={"count": count})) for count in counts},
+                },
+            }
+            for plan, counts in creative
+        ],
+    }
+
+
+@router.get("/multi-photo-studio/motion-study/{layout}/{count}/preview")
+def preview_motion_layout(layout: MotionStudyLayout, count: int, locale: Locale = DEFAULT_LOCALE):
+    if count not in layout.counts:
+        raise HTTPException(404, "This layout has no preview for that number of photos.")
+    return Response(content=motion_preview(layout, count, locale), media_type="image/jpeg",
+                    headers={"Content-Language": locale})
+
+
 @router.post("", response_model=SessionView, status_code=201)
 def start(request: Request, response: Response, body: StartRequest | None = None,
           booth_customer: str | None = Cookie(default=None)):
@@ -95,10 +188,14 @@ def start(request: Request, response: Response, body: StartRequest | None = None
             response.status_code = 200
             return existing
         token = issue_token()
+        plan = body.multi_photo_plan if body else None
+        if isinstance(plan, TimeSculpturePlan) and not request.app.state.settings.time_sculpture_enabled:
+            raise HTTPException(409, "Time Sculpture needs a configured, fixed-camera setup.")
         session = BoothSession(
             access_digest=token_digest(token), state=State.ACTIVE, started_at=now,
             expires_at=now + LIFETIME,
             experience=body.experience if body is not None else Experience.SINGLE,
+            multi_photo_plan=plan.model_dump(mode="json") if plan is not None else None,
         )
         db.add(session)
         db.flush()

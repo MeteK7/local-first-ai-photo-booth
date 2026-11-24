@@ -8,14 +8,18 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Cookie, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from PIL import Image
-from pydantic import BaseModel, ConfigDict, UUID4
-from sqlalchemy import DateTime, ForeignKey, Index, UniqueConstraint, select
+from pydantic import BaseModel, ConfigDict, Field, UUID4, computed_field
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, select
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.creative_sequences import render_creative_sequence
 from app.db import Base
-from app.filmstrip import FRAME_COUNT, HEIGHT, WIDTH, render_filmstrip
+from app.filmstrip import dimensions, render_filmstrip
+from app.i18n import DEFAULT_LOCALE, Locale, LocalizedError, UiMessage, legacy_messages
 from app.media import asset_path, jpeg_dimensions, save_jpeg, save_original
-from app.sessions import Experience, active_session
+from app.multi_photo import MAX_FRAMES, SignatureStripPlan, TimeSculpturePlan, print_layout
+from app.sessions import BoothSession, Experience, active_session
+from app.time_sculpture import render_time_sculpture
 
 router = APIRouter(prefix="/api/sessions/current/photos", tags=["photos"])
 ResultKind = Literal["original", "filmstrip"]
@@ -25,12 +29,15 @@ class OriginalPhoto(Base):
     __tablename__ = "original_photos"
     __table_args__ = (
         UniqueConstraint("session_id", "request_id", name="original_photo_capture_request"),
+        UniqueConstraint("session_id", "capture_slot", name="original_photo_capture_slot"),
+        CheckConstraint("capture_slot BETWEEN 1 AND 6", name="original_photo_slot_range"),
         Index("ix_original_photos_session_captured", "session_id", "captured_at"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
     session_id: Mapped[UUID] = mapped_column(ForeignKey("booth_sessions.id"))
     request_id: Mapped[UUID]
+    capture_slot: Mapped[int | None]
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     byte_size: Mapped[int]
     width: Mapped[int]
@@ -39,6 +46,9 @@ class OriginalPhoto(Base):
 
 class Filmstrip(Base):
     __tablename__ = "filmstrips"
+    __table_args__ = (
+        CheckConstraint("layout IN ('vertical', 'horizontal', 'grid')", name="filmstrip_layout"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
     session_id: Mapped[UUID] = mapped_column(ForeignKey("booth_sessions.id"), unique=True)
@@ -46,10 +56,20 @@ class Filmstrip(Base):
     byte_size: Mapped[int]
     width: Mapped[int]
     height: Mapped[int]
+    layout: Mapped[str | None] = mapped_column(String(12))
+    fallback_reason: Mapped[str | None]
+
+    def filename(self, session: BoothSession) -> str:
+        return "time-sculpture-poses.jpg" if self.fallback_reason else session.composition_filename
 
 
 class CaptureRequest(BaseModel):
     request_id: UUID4
+    slot: int | None = Field(default=None, ge=1, le=MAX_FRAMES, strict=True)
+
+
+class ComposeRequest(BaseModel):
+    locale: Locale = DEFAULT_LOCALE
 
 
 class PhotoView(BaseModel):
@@ -69,11 +89,17 @@ class FilmstripView(BaseModel):
     byte_size: int
     width: int
     height: int
+    fallback_reason: str | None = Field(default=None, exclude_if=lambda reason: reason is None)
+
+    @computed_field
+    @property
+    def messages(self) -> list[UiMessage]:
+        return legacy_messages(self.fallback_reason, "messages.sculptureFallback") if self.fallback_reason else []
 
 
 class FilmstripProgress(BaseModel):
     captured: int
-    required: int = FRAME_COUNT
+    required: int
     result: FilmstripView | None = None
 
 
@@ -91,10 +117,10 @@ def filmstrip_session(db, token: str | None, *, lock: bool = False):
     return session
 
 
-def strip_originals(db, session_id: UUID) -> list[OriginalPhoto]:
+def strip_originals(db, session_id: UUID, count: int) -> list[OriginalPhoto]:
     return list(db.scalars(
         select(OriginalPhoto).where(OriginalPhoto.session_id == session_id)
-        .order_by(OriginalPhoto.captured_at, OriginalPhoto.id).limit(FRAME_COUNT)
+        .order_by(OriginalPhoto.capture_slot.nulls_first(), OriginalPhoto.captured_at, OriginalPhoto.id).limit(count)
     ))
 
 
@@ -123,35 +149,51 @@ def latest(request: Request, booth_customer: str | None = Cookie(default=None)):
 def filmstrip_progress(request: Request, booth_customer: str | None = Cookie(default=None)):
     with request.app.state.db() as db:
         session = filmstrip_session(db, booth_customer)
+        count = session.capture_plan().count
         return FilmstripProgress(
-            captured=len(strip_originals(db, session.id)), result=saved_filmstrip(db, session.id),
+            captured=len(strip_originals(db, session.id, count)), required=count,
+            result=saved_filmstrip(db, session.id),
         )
 
 
 @router.post("/filmstrip", response_model=FilmstripView)
-def compose_filmstrip(request: Request, booth_customer: str | None = Cookie(default=None)):
+def compose_filmstrip(request: Request, body: ComposeRequest | None = None,
+                      booth_customer: str | None = Cookie(default=None)):
     root = request.app.state.settings.data_root
+    locale = body.locale if body else DEFAULT_LOCALE
     with request.app.state.db.begin() as db:
         session = filmstrip_session(db, booth_customer, lock=True)
         existing = saved_filmstrip(db, session.id)
         try:
             if existing is not None and asset_path(root, "processed", existing.id).is_file():
                 return existing
-            originals = strip_originals(db, session.id)
-            if len(originals) != FRAME_COUNT:
-                raise HTTPException(409, "Take all three photos before creating the filmstrip.")
-            jpeg = render_filmstrip([asset_path(root, "originals", photo.id) for photo in originals])
+            plan = session.capture_plan()
+            originals = strip_originals(db, session.id, plan.count)
+            if len(originals) != plan.count:
+                raise LocalizedError(409, "messages.takeAll", count=plan.count)
+            paths = [asset_path(root, "originals", photo.id) for photo in originals]
+            fallback = None
+            if isinstance(plan, TimeSculpturePlan):
+                sculpture = render_time_sculpture(paths, locale)
+                jpeg, fallback = sculpture.jpeg, sculpture.fallback_reason
+            elif isinstance(plan, SignatureStripPlan):
+                jpeg = render_filmstrip(paths, plan)
+            else:
+                jpeg = render_creative_sequence(paths, plan, locale)
+            layout = print_layout(plan)
+            width, height = dimensions(layout)
             result = existing or Filmstrip(
-                id=uuid4(), session_id=session.id, width=WIDTH, height=HEIGHT,
-                created_at=datetime.now(UTC),
+                id=uuid4(), session_id=session.id, width=width, height=height,
+                created_at=datetime.now(UTC), layout=layout if session.multi_photo_plan is not None else None,
             )
             result.byte_size = len(jpeg)
+            result.fallback_reason = fallback
             db.add(result)
             db.flush()
             save_jpeg(root, "processed", result.id, jpeg)
             return result
         except (OSError, ValueError, Image.DecompressionBombError):
-            raise HTTPException(503, "Could not create the filmstrip. Your originals are saved. Try again.") from None
+            raise HTTPException(503, "Could not create the composition. Your originals are saved. Try again.") from None
 
 
 @router.post("", status_code=201, response_model=PhotoView)
@@ -160,20 +202,33 @@ def capture(body: CaptureRequest, request: Request, response: Response,
     # Prevent concurrently finishing this session or repeating the same shutter request.
     with request.app.state.db.begin() as db:
         session = require_session(db, booth_customer, lock=True)
+        multi_photo = session.experience == Experience.FILMSTRIP
+        if not multi_photo and body.slot is not None:
+            raise HTTPException(422, "Frame positions are available in Multi-Photo Studio.")
         existing = db.scalar(select(OriginalPhoto).where(
             OriginalPhoto.session_id == session.id, OriginalPhoto.request_id == body.request_id,
         ))
         if existing is not None:
+            if body.slot is not None and existing.capture_slot not in (None, body.slot):
+                raise HTTPException(409, "This capture request belongs to another frame.")
             response.status_code = 200
             return existing
-        if session.experience == Experience.FILMSTRIP and len(strip_originals(db, session.id)) == FRAME_COUNT:
-            raise HTTPException(409, "This filmstrip already has all three photos.")
+        slot = None
+        if multi_photo:
+            count = session.capture_plan().count
+            originals = strip_originals(db, session.id, count)
+            slot = body.slot if body.slot is not None else len(originals) + 1
+            if slot <= len(originals):
+                response.status_code = 200
+                return originals[slot - 1]
+            if slot > count or slot != len(originals) + 1:
+                raise HTTPException(409, "This frame is outside the remaining capture sequence.")
         jpeg = request.app.state.camera.capture(session.id)
         try:
             width, height = jpeg_dimensions(jpeg)
         except ValueError:
             raise HTTPException(502, "The camera returned an invalid JPEG.") from None
-        photo = OriginalPhoto(id=uuid4(), session_id=session.id, request_id=body.request_id,
+        photo = OriginalPhoto(id=uuid4(), session_id=session.id, request_id=body.request_id, capture_slot=slot,
                               captured_at=datetime.now(UTC), byte_size=len(jpeg), width=width, height=height)
         db.add(photo)
         db.flush()
@@ -213,24 +268,26 @@ def owned_photo(request: Request, token: str | None, photo_id: UUID) -> Path:
     return stored_file(request, "originals", photo_id)
 
 
-def owned_filmstrip(request: Request, token: str | None, strip_id: UUID) -> Path:
+def owned_filmstrip(request: Request, token: str | None, strip_id: UUID) -> tuple[Path, str]:
     with request.app.state.db() as db:
         session = filmstrip_session(db, token)
         result = saved_filmstrip(db, session.id)
-    if result is None or result.id != strip_id:
-        raise HTTPException(404, "Filmstrip not found.")
-    return stored_file(request, "processed", strip_id)
+        if result is None or result.id != strip_id:
+            raise HTTPException(404, "Composition not found.")
+        filename = result.filename(session)
+    return stored_file(request, "processed", strip_id), filename
 
 
 @router.get("/filmstrip/{strip_id}/preview")
 def preview_filmstrip(strip_id: UUID, request: Request, booth_customer: str | None = Cookie(default=None)):
-    return FileResponse(owned_filmstrip(request, booth_customer, strip_id), media_type="image/jpeg")
+    path, _ = owned_filmstrip(request, booth_customer, strip_id)
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @router.get("/filmstrip/{strip_id}/download")
 def download_filmstrip(strip_id: UUID, request: Request, booth_customer: str | None = Cookie(default=None)):
-    return FileResponse(owned_filmstrip(request, booth_customer, strip_id), media_type="image/jpeg",
-                        filename="classic-filmstrip.jpg")
+    path, filename = owned_filmstrip(request, booth_customer, strip_id)
+    return FileResponse(path, media_type="image/jpeg", filename=filename)
 
 
 @router.get("/{photo_id}/preview")
