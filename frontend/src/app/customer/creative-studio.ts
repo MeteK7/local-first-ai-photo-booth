@@ -1,5 +1,5 @@
 import { Component, computed, inject, input, OnDestroy, OnInit, signal, viewChild } from '@angular/core';
-import { Api, CreativeTreatment, message, PhotoFile, PhotoResultKind } from '../shared/api';
+import { Api, CreativeTreatment, message, PhotoFile, PhotoResultKind, portraitFirst } from '../shared/api';
 import { PhoneDownloadAction } from './phone-download';
 import { PhotoPrintAction } from './photo-print';
 import { I18n, UiMessage } from '../shared/i18n';
@@ -12,6 +12,13 @@ interface DisplayPhoto {
   download: string;
   filename: string;
 }
+
+const frameCollections = [
+  { category: 'frame', label: 'studio.hazarFrames', optionsId: 'studio-hazar-options' },
+  { category: 'new-year-frame', label: 'studio.newYearFrames', optionsId: 'studio-new-year-options' },
+] as const;
+
+type FrameCategory = (typeof frameCollections)[number]['category'];
 
 @Component({
   selector: 'app-creative-studio',
@@ -28,23 +35,30 @@ interface DisplayPhoto {
             {{ treatmentName(item) }}
           </button>
         }
-        @if (frames().length) {
+        @for (collection of collections(); track collection.category) {
           <button type="button" class="secondary studio-frame-toggle"
-                  [class.studio-frame-active]="treatment()?.category === 'frame'"
-                  [attr.aria-expanded]="framesOpen()" aria-controls="studio-hazar-options"
-                  [disabled]="deliveryPending() || sessionBusy()" (click)="framesOpen.set(!framesOpen())">
-            {{ i18n.text('studio.hazarFrames') }}
+                  [class.studio-frame-active]="treatment()?.category === collection.category"
+                  [attr.aria-expanded]="openCollection() === collection.category" [attr.aria-controls]="collection.optionsId"
+                  [disabled]="deliveryPending() || sessionBusy()" (click)="toggleCollection(collection.category)">
+            {{ i18n.text(collection.label) }}
             <span class="studio-frame-chevron" aria-hidden="true"></span>
           </button>
         }
       </div>
-      @if (frames().length) {
-        <div id="studio-hazar-options" [hidden]="!framesOpen()" role="group" [attr.aria-label]="i18n.text('studio.hazarFrames')">
-          <div class="studio-treatments">
-            @for (item of frames(); track item.id) {
-              <button type="button" class="secondary" [attr.aria-pressed]="selected() === item.id"
+      @for (collection of collections(); track collection.category) {
+        <div [id]="collection.optionsId" [hidden]="openCollection() !== collection.category" role="group"
+             [attr.aria-label]="i18n.text(collection.label)">
+          <div class="studio-frame-options">
+            @for (item of collection.items; track item.id) {
+              <button type="button" class="secondary studio-frame-template" [attr.aria-pressed]="selected() === item.id"
                       [disabled]="deliveryPending() || sessionBusy()" (click)="choose(item)">
-                {{ treatmentName(item) }}
+                @if (openCollection() === collection.category && item.preview) {
+                  <span class="studio-frame-preview">
+                    <img [src]="item.preview" [attr.width]="item.preview_width" [attr.height]="item.preview_height"
+                         alt="" loading="lazy" decoding="async">
+                  </span>
+                }
+                <span>{{ treatmentName(item) }}</span>
               </button>
             }
           </div>
@@ -96,9 +110,14 @@ export class CreativeStudio implements OnInit, OnDestroy {
   readonly photo = input.required<PhotoFile>();
   readonly sessionBusy = input(false);
   readonly treatments = signal<CreativeTreatment[]>([]);
-  protected readonly effects = computed(() => this.treatments().filter(item => item.category !== 'frame'));
-  protected readonly frames = computed(() => this.treatments().filter(item => item.category === 'frame'));
-  protected readonly framesOpen = signal(false);
+  protected readonly effects = computed(() => this.treatments().filter(item => !item.category || item.category === 'treatment'));
+  protected readonly collections = computed(() => {
+    const treatments = this.treatments();
+    return frameCollections.map(collection => ({
+      ...collection, items: treatments.filter(item => item.category === collection.category).sort(portraitFirst),
+    })).filter(collection => collection.items.length > 0);
+  });
+  protected readonly openCollection = signal<FrameCategory | null>(null);
   readonly selected = signal('original');
   readonly catalogError = signal<UiMessage[] | null>(null);
   readonly requesting = signal<ReadonlySet<string>>(new Set());
@@ -133,16 +152,20 @@ export class CreativeStudio implements OnInit, OnDestroy {
 
   ngOnInit(): void { void this.refresh(); }
 
+  protected toggleCollection(category: FrameCategory): void {
+    this.openCollection.update(open => open === category ? null : category);
+  }
+
   selectOriginal(): void {
     if (this.sessionBusy() || this.deliveryPending()) return;
     this.selected.set('original');
-    this.framesOpen.set(false);
+    this.openCollection.set(null);
   }
 
   async choose(item: CreativeTreatment): Promise<void> {
     if (this.sessionBusy() || this.deliveryPending()) return;
     this.selected.set(item.id);
-    if (item.category !== 'frame') this.framesOpen.set(false);
+    if (!item.category || item.category === 'treatment') this.openCollection.set(null);
     if (this.requesting().has(item.id) || (item.result && item.result.state !== 'failed')) return;
     this.requestErrors.update(errors => ({ ...errors, [item.id]: undefined }));
     this.requesting.update(pending => new Set([...pending, item.id]));
