@@ -103,6 +103,23 @@ def test_new_year_frame_fills_the_opening_and_preserves_the_artwork(name):
                            for actual, reference in zip(photo.getpixel((x, y)), source[:3], strict=True))
 
 
+def test_colorful_2027_removes_black_opening_but_preserves_white_and_decorations():
+    with Image.open(ARTWORK / "new-year-colorful-2027-portrait.png") as artwork:
+        assert artwork.size == (1023, 1538)
+        with (artwork.getchannel("A") as alpha, artwork.getchannel("R") as red,
+              artwork.getchannel("G") as green, artwork.getchannel("B") as blue,
+              ImageChops.darker(red, green) as warm, ImageChops.darker(warm, blue) as lightest,
+              lightest.point(lambda value: 255 if value >= 200 else 0) as whites,
+              ImageChops.invert(alpha) as holes, ImageChops.multiply(whites, holes) as removed_white):
+            assert whites.getbbox() is not None
+            assert removed_white.getbbox() is None
+        assert artwork.getpixel((512, 768))[3] == 0
+        # White header, fireworks backdrop, pale outer corner and bright artwork.
+        for position in ((512, 150), (512, 250), (980, 30), (100, 100), (512, 350)):
+            assert artwork.getpixel(position)[3] == 255
+        assert artwork.getpixel((512, 0))[3] == 255
+
+
 @pytest.mark.parametrize("name", NEW_YEAR_PHOTO_BOXES)
 def test_offset_new_year_window_keeps_the_subject_centered_and_preserves_decorations(name):
     with Image.new("RGB", (800, 800), "#2d414d") as source, BytesIO() as jpeg:
@@ -115,22 +132,41 @@ def test_offset_new_year_window_keeps_the_subject_centered_and_preserves_decorat
             assert artwork.getpixel(center)[3] <= 1
             assert all(abs(actual - expected) <= 4
                        for actual, expected in zip(photo.getpixel(center), (239, 113, 68), strict=True))
-            for position in ((100, 100), (300, 400), (1000, 950), (1450, 900)):
+            width, height = artwork.size
+            for position in ((width // 16, height // 16), (width // 2, height // 16),
+                             (width // 16, height * 15 // 16), (width * 15 // 16, height * 15 // 16)):
                 assert artwork.getpixel(position)[3] >= 250
 
 
 @pytest.mark.parametrize("background", [(45, 65, 77), (180, 140, 100)])
-def test_cozy_winter_retains_its_translucent_inner_glow(background):
-    name = "new-year-cozy-winter-landscape"
-    # Native RGBA values at the rounded corners, inner sides and lower edge.
-    # The glow must blend with the photograph rather than become a hard cutout.
-    glow = {
+@pytest.mark.parametrize(("name", "glow"), [
+    ("new-year-cozy-winter-landscape", {
         (810, 170): (217, 214, 211, 166),
         (790, 210): (239, 238, 236, 120),
         (770, 400): (232, 230, 228, 81),
         (1400, 500): (227, 224, 223, 31),
         (1086, 850): (241, 239, 237, 43),
-    }
+    }),
+    ("new-year-pine-cones-portrait", {
+        (130, 700): (108, 183, 255, 160),
+        (150, 700): (102, 181, 255, 107),
+        (180, 700): (81, 168, 255, 44),
+        (220, 700): (39, 137, 255, 13),
+        (512, 350): (103, 179, 255, 158),
+        (512, 400): (72, 163, 255, 39),
+    }),
+    ("new-year-fireworks-portrait", {
+        (512, 250): (236, 109, 38, 0),
+        (448, 20): (56, 120, 230, 4),
+        (566, 20): (231, 102, 142, 171),
+        (700, 100): (199, 106, 99, 1),
+        (600, 150): (177, 94, 100, 2),
+        (512, 96): (1, 109, 236, 252),
+    }),
+])
+def test_new_year_frame_retains_its_translucent_inner_glow(name, glow, background):
+    # Native RGBA values at the rounded corners, inner sides and lower edge.
+    # The glow must blend with the photograph rather than become a hard cutout.
     with Image.new("RGB", (800, 800), background) as original, BytesIO() as jpeg:
         original.save(jpeg, "JPEG", quality=100, subsampling=0)
         with (Image.open(BytesIO(jpeg.getvalue())) as decoded,

@@ -23,6 +23,9 @@ NEW_YEAR_PHOTO_BOXES = {
     "new-year-bright-blue-landscape": (626, 122, 1421, 711),
     "new-year-vibrant-2027-landscape": (624, 117, 1426, 718),
     "new-year-cozy-winter-landscape": (716, 156, 1456, 884),
+    "new-year-pine-cones-portrait": (120, 339, 809, 1134),
+    "new-year-fireworks-portrait": (0, 0, 1024, 1536),
+    "new-year-colorful-2027-portrait": (0, 0, 1023, 1538),
 }
 
 
@@ -345,7 +348,7 @@ for artwork in (
         name=translate(f"{key}.name"),
         description=translate(f"{key}.description"),
         renderer=composed(partial(new_year_frame, artwork=artwork)),
-        version=2 if artwork == "new-year-cozy-winter-landscape" else 1,
+        version=2 if artwork in {"new-year-cozy-winter-landscape", "new-year-fireworks-portrait"} else 1,
         category="new-year-frame",
         frame_size=size,
     )

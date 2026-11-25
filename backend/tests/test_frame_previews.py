@@ -34,6 +34,7 @@ def test_frame_samples_are_available_without_a_customer_photo_and_keep_the_print
 
 @pytest.mark.parametrize("path", [
     "unknown/preview", "classic-filter/preview", "hazar-station-portrait/preview?version=999",
+    "new-year-fireworks-portrait/preview?version=1",
 ])
 def test_frame_samples_reject_unknown_frames_effects_and_old_versions(client, path):
     assert client.get(f"{router.prefix}/frames/{path}").status_code == 404

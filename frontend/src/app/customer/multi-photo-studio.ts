@@ -125,6 +125,7 @@ class CompositionPreview {
               <div class="multi-photo-mat">
                 <img class="multi-new-year-preview" [src]="template.preview" [attr.width]="template.preview_width ?? 480"
                      [attr.height]="template.preview_height ?? 720"
+                     [style.--new-year-preview-width-ratio]="newYearPreviewWidthRatio()"
                      [alt]="i18n.text('studio.sampleAlt', { layout: newYearName(template), count: selected.count })">
               </div>
             </div>
@@ -182,6 +183,12 @@ export class MultiPhotoStudio implements OnInit {
     const selected = this.plan();
     return selected?.experience === 'new-year'
       ? this.catalog()?.new_year?.find(template => template.id === selected.template) : undefined;
+  });
+  protected readonly newYearPreviewWidthRatio = computed(() => {
+    const template = this.newYear();
+    const width = template?.preview_width ?? 480;
+    const height = template?.preview_height ?? 720;
+    return width / Math.max(width, height);
   });
   readonly creative = computed(() => this.catalog()?.creative?.find(option => option.default_plan.experience === this.plan()?.experience));
   readonly motionLayout = computed(() => {

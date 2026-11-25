@@ -19,6 +19,9 @@ const catalog = [
   { id: 'hazar-roadside-landscape', name: 'Roadside · Landscape', description: '', category: 'frame', result: null },
   { id: 'new-year-golden-midnight-portrait', name: 'Golden Midnight · Portrait', description: '', category: 'new-year-frame', result: null },
   { id: 'new-year-ornate-2027-portrait', name: 'Ornate 2027 · Portrait', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-pine-cones-portrait', name: 'Festive Pine Cones · Portrait', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-fireworks-portrait', name: 'Fireworks Celebration · Portrait', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-colorful-2027-portrait', name: 'Colorful 2027 · Portrait', description: '', category: 'new-year-frame', result: null },
   { id: 'new-year-winter-garland-landscape', name: 'Winter Garland · Landscape', description: '', category: 'new-year-frame', result: null },
   { id: 'new-year-winter-drive-blue-landscape', name: 'Winter Drive · Blue Car', description: '', category: 'new-year-frame', result: null },
   { id: 'new-year-winter-drive-red-landscape', name: 'Winter Drive · Red Car', description: '', category: 'new-year-frame', result: null },
@@ -153,6 +156,9 @@ describe('Creative Studio', () => {
     ['Bright Blue · 2027', 'new-year-bright-blue-landscape'],
     ['Vibrant Celebration · 2027', 'new-year-vibrant-2027-landscape'],
     ['Cozy Winter · 2027', 'new-year-cozy-winter-landscape'],
+    ['Festive Pine Cones · Portrait', 'new-year-pine-cones-portrait'],
+    ['Fireworks Celebration · Portrait', 'new-year-fireworks-portrait'],
+    ['Colorful 2027 · Portrait', 'new-year-colorful-2027-portrait'],
   ])('opens the New Year collection and selects %s', async (label, treatment) => {
     const { fixture, http, element, button } = await setUp();
     const newYear = button('New Year Frames');
@@ -169,13 +175,14 @@ describe('Creative Studio', () => {
     expect(newYear.getAttribute('aria-expanded')).toBe('true');
     expect(frames.hidden).toBe(false);
     const thumbnails = Array.from(frames.querySelectorAll<HTMLImageElement>('.studio-frame-preview img'));
-    expect(thumbnails.length).toBe(8);
+    expect(thumbnails.length).toBe(11);
     expect(thumbnails.every(image => image.getAttribute('src')?.includes('/frames/new-year-'))).toBe(true);
     expect(thumbnails.map(image => Number(image.width) > Number(image.height))).toEqual([
-      false, false, true, true, true, true, true, true,
+      false, false, false, false, false, true, true, true, true, true, true,
     ]);
     expect(Array.from(frames.querySelectorAll('button'), item => item.textContent.trim())).toEqual([
-      'Golden Midnight · Portrait', 'Ornate 2027 · Portrait', 'Winter Garland · Landscape',
+      'Golden Midnight · Portrait', 'Ornate 2027 · Portrait', 'Festive Pine Cones · Portrait',
+      'Fireworks Celebration · Portrait', 'Colorful 2027 · Portrait', 'Winter Garland · Landscape',
       'Winter Drive · Blue Car', 'Winter Drive · Red Car',
       'Bright Blue · 2027', 'Vibrant Celebration · 2027', 'Cozy Winter · 2027',
     ]);

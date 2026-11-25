@@ -162,7 +162,10 @@ p, dt { color: var(--muted); line-height: 1.6; }
 .multi-new-year-template img { display: block; width: 100%; height: auto; border-radius: 3px; }
 .multi-new-year-template span { font-size: .87rem; line-height: 1.25; }
 .multi-new-year-template small { color: var(--muted); font-size: .77rem; }
-.multi-new-year-preview { display: block; width: min(100%, 360px); height: auto; max-height: 390px; object-fit: contain; }
+.multi-new-year-preview {
+  /* Use the same longest edge for both orientations, including on narrow screens. */
+  display: block; width: calc(min(100%, 540px) * var(--new-year-preview-width-ratio)); height: auto; object-fit: contain;
+}
 @media (max-width: 600px) {
   .multi-new-year-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -331,6 +334,17 @@ p, dt { color: var(--muted); line-height: 1.6; }
   border-radius: 4px; background: #1a2332;
 }
 .studio-frame-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; border-radius: 3px; }
+@media (min-width: 1100px) {
+  .shell:has(.multi-new-year-options) { width: 100%; }
+  .multi-photo:has(.multi-new-year-options) { max-width: none; }
+  /* Preserve the original cards: (860px panel - 110px padding - 2px border - 30px gaps) / 4. */
+  .multi-new-year-options { grid-template-columns: repeat(auto-fill, 179.5px); }
+}
+@media (min-width: 1440px) {
+  .shell:has(#studio-new-year-options:not([hidden])) { width: 100%; }
+  /* Preserve the original cards: (1280px shell - 144px shell padding - 110px panel padding - 2px border - 30px gaps) / 4. */
+  #studio-new-year-options .studio-frame-options { grid-template-columns: repeat(auto-fill, 248.5px); }
+}
 .studio-caption :is(h3, p) { margin: 0 0 8px; }
 .studio-caption h3 { font-size: 1rem; }
 .studio-caption p { font-size: .91rem; }
