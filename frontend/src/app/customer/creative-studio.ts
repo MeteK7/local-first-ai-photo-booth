@@ -3,6 +3,7 @@ import { Api, CreativeTreatment, message, PhotoFile, PhotoResultKind, portraitFi
 import { PhoneDownloadAction } from './phone-download';
 import { PhotoPrintAction } from './photo-print';
 import { I18n, UiMessage } from '../shared/i18n';
+import { NewYearFramesButton } from './new-year-frames-button';
 
 interface DisplayPhoto {
   id: string;
@@ -22,11 +23,19 @@ type FrameCategory = (typeof frameCollections)[number]['category'];
 
 @Component({
   selector: 'app-creative-studio',
-  imports: [PhoneDownloadAction, PhotoPrintAction],
+  imports: [PhoneDownloadAction, PhotoPrintAction, NewYearFramesButton],
   template: `
     <section class="session-result studio" aria-labelledby="studio-heading">
       <h2 id="studio-heading">{{ i18n.text('studio.creativeTitle') }}</h2>
       <div class="studio-treatments" role="group" [attr.aria-label]="i18n.text('studio.treatments')">
+        @for (collection of collections(); track collection.category) {
+          @if (collection.category === 'new-year-frame') {
+            <button appNewYearFrames type="button" class="studio-frame-toggle"
+                    [class.studio-frame-active]="treatment()?.category === collection.category"
+                    [attr.aria-expanded]="openCollection() === collection.category" [attr.aria-controls]="collection.optionsId"
+                    [disabled]="deliveryPending() || sessionBusy()" (click)="toggleCollection(collection.category)"></button>
+          }
+        }
         <button type="button" class="secondary" [attr.aria-pressed]="selected() === 'original'"
                 [disabled]="deliveryPending() || sessionBusy()" (click)="selectOriginal()">{{ i18n.text('studio.original') }}</button>
         @for (item of effects(); track item.id) {
@@ -36,13 +45,15 @@ type FrameCategory = (typeof frameCollections)[number]['category'];
           </button>
         }
         @for (collection of collections(); track collection.category) {
-          <button type="button" class="secondary studio-frame-toggle"
-                  [class.studio-frame-active]="treatment()?.category === collection.category"
-                  [attr.aria-expanded]="openCollection() === collection.category" [attr.aria-controls]="collection.optionsId"
-                  [disabled]="deliveryPending() || sessionBusy()" (click)="toggleCollection(collection.category)">
-            {{ i18n.text(collection.label) }}
-            <span class="studio-frame-chevron" aria-hidden="true"></span>
-          </button>
+          @if (collection.category !== 'new-year-frame') {
+            <button type="button" class="secondary studio-frame-toggle"
+                    [class.studio-frame-active]="treatment()?.category === collection.category"
+                    [attr.aria-expanded]="openCollection() === collection.category" [attr.aria-controls]="collection.optionsId"
+                    [disabled]="deliveryPending() || sessionBusy()" (click)="toggleCollection(collection.category)">
+              {{ i18n.text(collection.label) }}
+              <span class="studio-frame-chevron" aria-hidden="true"></span>
+            </button>
+          }
         }
       </div>
       @for (collection of collections(); track collection.category) {

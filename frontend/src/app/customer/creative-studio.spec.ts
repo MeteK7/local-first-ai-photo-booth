@@ -44,7 +44,7 @@ async function setUp() {
   const http = TestBed.inject(HttpTestingController);
   const element = fixture.nativeElement as HTMLElement;
   const button = (label: string) => Array.from(element.querySelectorAll('button'))
-    .find(item => item.textContent.trim() === label)!;
+    .find(item => item.getAttribute('aria-label') === label || item.textContent.trim() === label)!;
   fixture.detectChanges();
   http.expectOne(photos + '/creative?asset_id=source').flush(catalog);
   http.expectOne(photos + '/print-jobs?asset_id=source&kind=original').flush(null);

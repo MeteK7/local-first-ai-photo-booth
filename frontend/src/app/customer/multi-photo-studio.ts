@@ -2,6 +2,7 @@ import { Component, computed, inject, input, OnInit, signal } from '@angular/cor
 import { Router, RouterLink } from '@angular/router';
 import { Api, CapturePlan, CompositionGeometry, message, MotionLayoutChoice, MultiPhotoCatalog, NewYearChoice, portraitFirst } from '../shared/api';
 import { I18n, UiMessage } from '../shared/i18n';
+import { NewYearFramesButton } from './new-year-frames-button';
 
 @Component({
   selector: 'app-composition-preview',
@@ -25,7 +26,7 @@ class CompositionPreview {
 
 @Component({
   selector: 'app-multi-photo-studio',
-  imports: [RouterLink, CompositionPreview],
+  imports: [RouterLink, CompositionPreview, NewYearFramesButton],
   template: `
     <section class="panel multi-photo" aria-labelledby="multi-photo-title">
       <header class="multi-photo-header">
@@ -47,14 +48,11 @@ class CompositionPreview {
               }
             </div>
             @if (options.new_year?.length) {
-              <div class="multi-photo-collection" role="group" aria-labelledby="new-year-collection">
+              <div class="multi-photo-collection multi-new-year-collection" role="group" aria-labelledby="new-year-collection">
                 <h2 id="new-year-collection">{{ i18n.text('studio.newYearCollection') }}</h2>
-                <button class="secondary studio-frame-toggle" type="button"
+                <button appNewYearFrames class="studio-frame-toggle" type="button"
                         [aria-pressed]="selected.experience === 'new-year'" [attr.aria-expanded]="newYearOpen()"
-                        aria-controls="multi-new-year-options" [disabled]="starting()" (click)="toggleNewYear()">
-                  {{ i18n.text('studio.newYearFrames') }}
-                  <span class="studio-frame-chevron" aria-hidden="true"></span>
-                </button>
+                        aria-controls="multi-new-year-options" [disabled]="starting()" (click)="toggleNewYear()"></button>
               </div>
             }
           </div>

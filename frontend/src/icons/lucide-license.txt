@@ -1,4 +1,4 @@
-Lucide icons used by the photo booth: aperture, image-down, qr-code, printer
+Lucide icons used by the photo booth: aperture, image-down, qr-code, printer, party-popper
 https://lucide.dev/license
 
 ISC License

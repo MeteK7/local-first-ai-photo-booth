@@ -322,6 +322,34 @@ p, dt { color: var(--muted); line-height: 1.6; }
   border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 .studio-frame-toggle[aria-expanded="true"] .studio-frame-chevron { transform: rotate(225deg); }
+.studio-treatments:has(.new-year-frame-button) {
+  grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 14px;
+}
+.studio-treatments .new-year-frame-button { grid-column: span 2; grid-row: span 2; }
+.multi-photo-collections:has(.new-year-frame-button) {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(220px, 1.2fr);
+  grid-template-rows: auto minmax(100px, 1fr); gap: 24px 12px;
+}
+.multi-photo-collections:has(.new-year-frame-button) .multi-photo-collection {
+  /* Share header and button rows so wrapped collection names keep the buttons aligned. */
+  grid-row: span 2; grid-template-rows: subgrid;
+}
+.multi-photo-collections:has(.new-year-frame-button) .multi-photo-creative-modes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.multi-photo-collections .multi-new-year-collection > .new-year-frame-button { margin-top: 0; }
+@media (max-width: 680px) {
+  .studio-treatments:has(.new-year-frame-button) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .studio-treatments .new-year-frame-button { grid-column: 1 / -1; grid-row: auto; }
+}
+@media (max-width: 900px) {
+  .multi-photo-collections:has(.new-year-frame-button) {
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 16px;
+  }
+  .multi-photo-collections:has(.new-year-frame-button) .multi-photo-collection {
+    grid-row: auto; grid-template-rows: auto minmax(60px, auto); row-gap: 24px;
+  }
+}
 .studio-frame-options {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px;
 }
