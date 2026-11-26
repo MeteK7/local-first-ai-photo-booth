@@ -1,0 +1,54 @@
+{
+  "tool": "Built-in image_gen",
+  "method": "Original RGB pixels are preserved. Earlier masks use normalized opacity; Burgundy Celebration, Retro Confetti and Aurora Celebration retain soft generated alpha gradients for inner lighting. See each edit and prepare-new-year-multi.py.",
+  "edits": [
+    {
+      "template": "radiant-welcome",
+      "source": "Radiant Welcome 2027 Celebration Collage.png",
+      "prompt": "Use case: background-extraction. Asset type: precise alpha-mask edit of a photo-booth collage overlay. Input image: the referenced file is the EDIT TARGET, not a style reference. Make ONLY the four blank photo interiors fully transparent with genuine alpha, all the way to the inner edges of their frames. The blank interiors are white. Keep every frame, overlapping ribbon, star, clock, confetti, decoration, lettering, black background and all other pixels opaque and exactly unchanged. Preserve the exact original canvas dimensions, positions, angles, text and details. Do not redesign, crop, straighten, or change the aspect ratio. Return the original artwork with four transparent photo windows, not an illustration of a checkerboard."
+    },
+    {
+      "template": "hello-2027",
+      "source": "Hello 2027 Celebration Collage.png",
+      "prompt": "Use case: background-extraction. Asset type: precise alpha-mask edit of a photo-booth collage overlay. Input image: the referenced file is the EDIT TARGET, not a style reference. Make ONLY the four blank photo interiors fully transparent with genuine alpha, all the way to the inner edges of their frames. The blank interiors are white. Keep every frame, overlapping ribbon, star, clock, confetti, decoration, lettering, black background and all other pixels opaque and exactly unchanged. Preserve the exact original canvas dimensions, positions, angles, text and details. Do not redesign, crop, straighten, or change the aspect ratio. Return the original artwork with four transparent photo windows, not an illustration of a checkerboard."
+    },
+    {
+      "template": "glittering-welcome",
+      "source": "Welcome 2027_ Glittering Celebration Collage.png",
+      "prompt": "Use case: background-extraction. Asset type: precise alpha-mask edit of a photo-booth collage overlay. Input image: the referenced file is the EDIT TARGET, not a style reference. Make ONLY the four blank photo interiors fully transparent with genuine alpha, all the way to the inner edges of their frames. The blank interiors are white. Keep every frame, overlapping ribbon, star, clock, confetti, decoration, lettering, black background and all other pixels opaque and exactly unchanged. Preserve the exact original canvas dimensions, positions, angles, text and details. Do not redesign, crop, straighten, or change the aspect ratio. Return the original artwork with four transparent photo windows, not an illustration of a checkerboard."
+    },
+    {
+      "template": "welcome-celebration",
+      "source": "Welcome to the 2027 Celebration.png",
+      "prompt": "Use case: background-extraction. Asset type: precise alpha-mask edit of a photo-booth collage overlay. Input image: the referenced file is the EDIT TARGET, not a style reference. Make ONLY the four blank photo interiors fully transparent with genuine alpha, all the way to the inner edges of their frames. The blank interiors are white. Keep every frame, overlapping ribbon, star, clock, confetti, decoration, lettering, black background and all other pixels opaque and exactly unchanged. Preserve the exact original canvas dimensions, positions, angles, text and details. Do not redesign, crop, straighten, or change the aspect ratio. Return the original artwork with four transparent photo windows, not an illustration of a checkerboard."
+    },
+    {
+      "template": "champagne-cheers",
+      "source": "Gemini_Generated_Image_98cchu98cchu98cc.jpg",
+      "prompt": "Use case: background-extraction. Asset type: precise alpha-mask edit of a photo-booth collage overlay. Input image: the referenced file is the EDIT TARGET, not a style reference. Make ONLY the four blank photo interiors fully transparent with genuine alpha, all the way to the inner edges of their frames. The blank interiors are dark charcoal rectangles. Keep every frame, overlapping ribbon, star, clock, confetti, decoration, lettering, black background and all other pixels opaque and exactly unchanged. Preserve the exact original canvas dimensions, positions, angles, text and details. Do not redesign, crop, straighten, or change the aspect ratio. Return the original artwork with four transparent photo windows, not an illustration of a checkerboard."
+    },
+    {
+      "template": "new-years-eve",
+      "source": "Gemini_Generated_Image_2lhvwg2lhvwg2lhv.jpg",
+      "prompt": "Use case: background-extraction. Asset type: precise alpha-mask edit of a photo-booth collage overlay. Input image: the referenced file is the EDIT TARGET, not a style reference. Make ONLY the four blank photo interiors fully transparent with genuine alpha, all the way to the inner edges of their frames. The blank interiors are dark charcoal rectangles. Keep every frame, overlapping ribbon, star, clock, confetti, decoration, lettering, black background and all other pixels opaque and exactly unchanged. Preserve the exact original canvas dimensions, positions, angles, text and details. Do not redesign, crop, straighten, or change the aspect ratio. Return the original artwork with four transparent photo windows, not an illustration of a checkerboard."
+    },
+    {
+      "template": "burgundy-celebration",
+      "source": "Festive 2027 Burgundy New Year Frame.png",
+      "prompt": "Use case: background-extraction. Asset type: production transparent PNG photo-booth overlay. The referenced image is the edit target. Make ONLY the four dark burgundy-purple photo interiors: the large upper-left landscape frame, tall central frame, lower-left small landscape frame, and lower-right large landscape frame. Retain the champagne glasses, hanging star bunting, overlapping central border, every ribbon and streamer, gifts, snow globe, and all golden border lines. Keep all artwork outside these four photo windows completely opaque and unchanged. Preserve exact canvas aspect ratio, composition, frame positions, angles, lettering, original colors and decoration. All plain placeholder interiors must become truly alpha-transparent. Keep original soft edge highlights, shadows and glows as delicate semi-transparent transitions that blend over real photos. Preserve foreground objects that overlap photo windows. Do not redraw, redesign, crop, straighten frames or add new artwork. No checkerboard graphics and no solid white or black replacement inside the openings.",
+      "method": "Generated soft alpha retained and resampled to original canvas; original RGB pixels preserved. Near-opaque values >=250 normalized to opaque; intermediate inner glow values are not thresholded."
+    },
+    {
+      "template": "retro-confetti",
+      "source": "Gemini_Generated_Image_jo435jo435jo435j.jpg",
+      "prompt": "Use case: background-extraction. EDIT TARGET: the supplied retro Happy New Year 2027 collage. Remove the solid dark charcoal filling from exactly the FOUR rectangular photo windows, producing actual PNG transparency with alpha exactly ZERO throughout those four interiors. This is an alpha cutout task for inserting real photographs. Do NOT draw a checkerboard, white fill, fog, haze, tint, shadows, or translucent coating in the empty windows. These windows must be completely empty transparent holes. Preserve the burgundy and gold border strips, every other background and decoration, and all lettering unchanged, fully opaque. Retain canvas aspect ratio and original frame positions exactly. No redesign.",
+      "method": "Generated soft alpha retained and resampled to original canvas; original RGB pixels preserved. Near-opaque values >=250 normalized to opaque; intermediate inner glow values are not thresholded."
+    },
+    {
+      "template": "aurora-celebration",
+      "source": "New Year 2027 Aurora Celebration.png",
+      "prompt": "Use case: background-extraction. Asset type: production transparent PNG photo-booth overlay. The referenced image is the edit target. Make ONLY the four white photo interiors within the tilted gold frames: upper left, upper right portrait, lower left, and lower right landscape. CRITICAL: preserve the soft inner shadows and luminous feathered lighting along every inner edge and rounded corner as subtle PARTIALLY TRANSPARENT shading/glow over the inserted photograph. Remove only the plain white placeholder interiors. Do not cut away the soft inner lighting and do not leave an opaque white matte. Preserve the foreground 2027 numerals, central clock, star and Happy New Year ribbon, lantern, snow globe, pine cones and all overlapping foreground objects. Keep all artwork outside these four photo windows completely opaque and unchanged. Preserve exact canvas aspect ratio, composition, frame positions, angles, lettering, original colors and decoration. All plain placeholder interiors must become truly alpha-transparent. Keep original soft edge highlights, shadows and glows as delicate semi-transparent transitions that blend over real photos. Preserve foreground objects that overlap photo windows. Do not redraw, redesign, crop, straighten frames or add new artwork. No checkerboard graphics and no solid white or black replacement inside the openings.",
+      "method": "Generated soft alpha retained and resampled to original canvas; original RGB pixels preserved. Near-opaque values >=250 normalized to opaque; intermediate inner glow values are not thresholded."
+    }
+  ]
+}

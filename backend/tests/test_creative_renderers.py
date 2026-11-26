@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from PIL import Image, ImageChops, ImageDraw
 
-from app.creative_renderers import ARTWORK, CATALOG, detail_regions, render, station_portrait_layers
+from app.creative_renderers import ARTWORK, CATALOG, NEW_YEAR_PHOTO_BOXES, detail_regions, render, station_portrait_layers
 
 SEED = UUID(int=12)
 
@@ -60,6 +60,9 @@ def test_compositions_fit_photo_paper_and_strip_camera_metadata(size, orientatio
                             or (CATALOG[name].category == "frame" and name.endswith("-portrait")))
                 if name == "hazar-station-portrait":
                     expected = (1056, 1429)
+                elif CATALOG[name].category == "new-year-frame":
+                    with Image.open(ARTWORK / f"{name}.png") as artwork:
+                        expected = artwork.size
                 else:
                     expected = (1200, 1800) if vertical else (1800, 1200)
                 assert image.size == expected and image.info["dpi"] == (300, 300)
@@ -77,6 +80,105 @@ def test_hazar_frame_shows_the_original_color_through_its_window(name):
         assert all(abs(actual - expected) < 4 for actual, expected in zip(pixel, (45, 65, 77), strict=True))
         with photo.crop((0, photo.height * 9 // 10, photo.width, photo.height)) as footer:
             assert any(high - low > 32 for low, high in footer.getextrema())
+
+
+@pytest.mark.parametrize("name", [name for name, recipe in CATALOG.items() if recipe.category == "new-year-frame"])
+def test_new_year_frame_fills_the_opening_and_preserves_the_artwork(name):
+    original = sample((720, 480), textured=False)
+    with (Image.open(ARTWORK / f"{name}.png") as artwork,
+          Image.open(BytesIO(render(name, CATALOG[name].version, original, SEED))) as photo):
+        w, h = artwork.size
+        assert photo.size == artwork.size
+        left, top, right, bottom = NEW_YEAR_PHOTO_BOXES.get(name, (0, 0, w, h))
+        width, height = right - left, bottom - top
+        with photo.crop((left + width * 2 // 5, top + height * 2 // 5,
+                         left + width * 3 // 5, top + height * 3 // 5)) as window:
+            expected = (45, 65, 77)
+            assert all(abs(value - channel) <= 4 for pair, channel in zip(window.getextrema(), expected, strict=True)
+                       for value in pair)
+        for x, y in ((w // 2, h // 16), (w // 2, h * 15 // 16), (w * 4 // 5, h * 15 // 16)):
+            source = artwork.getpixel((x, y))
+            if artwork.mode == "RGB" or source[3] >= 250:
+                assert all(abs(actual - reference) <= 16
+                           for actual, reference in zip(photo.getpixel((x, y)), source[:3], strict=True))
+
+
+def test_colorful_2027_removes_black_opening_but_preserves_white_and_decorations():
+    with Image.open(ARTWORK / "new-year-colorful-2027-portrait.png") as artwork:
+        assert artwork.size == (1023, 1538)
+        with (artwork.getchannel("A") as alpha, artwork.getchannel("R") as red,
+              artwork.getchannel("G") as green, artwork.getchannel("B") as blue,
+              ImageChops.darker(red, green) as warm, ImageChops.darker(warm, blue) as lightest,
+              lightest.point(lambda value: 255 if value >= 200 else 0) as whites,
+              ImageChops.invert(alpha) as holes, ImageChops.multiply(whites, holes) as removed_white):
+            assert whites.getbbox() is not None
+            assert removed_white.getbbox() is None
+        assert artwork.getpixel((512, 768))[3] == 0
+        # White header, fireworks backdrop, pale outer corner and bright artwork.
+        for position in ((512, 150), (512, 250), (980, 30), (100, 100), (512, 350)):
+            assert artwork.getpixel(position)[3] == 255
+        assert artwork.getpixel((512, 0))[3] == 255
+
+
+@pytest.mark.parametrize("name", NEW_YEAR_PHOTO_BOXES)
+def test_offset_new_year_window_keeps_the_subject_centered_and_preserves_decorations(name):
+    with Image.new("RGB", (800, 800), "#2d414d") as source, BytesIO() as jpeg:
+        ImageDraw.Draw(source).ellipse((300, 300, 500, 500), fill="#ef7144")
+        source.save(jpeg, "JPEG")
+        with (Image.open(ARTWORK / f"{name}.png") as artwork,
+              Image.open(BytesIO(render(name, CATALOG[name].version, jpeg.getvalue(), SEED))) as photo):
+            left, top, right, bottom = NEW_YEAR_PHOTO_BOXES[name]
+            center = ((left + right) // 2, (top + bottom) // 2)
+            assert artwork.getpixel(center)[3] <= 1
+            assert all(abs(actual - expected) <= 4
+                       for actual, expected in zip(photo.getpixel(center), (239, 113, 68), strict=True))
+            width, height = artwork.size
+            for position in ((width // 16, height // 16), (width // 2, height // 16),
+                             (width // 16, height * 15 // 16), (width * 15 // 16, height * 15 // 16)):
+                assert artwork.getpixel(position)[3] >= 250
+
+
+@pytest.mark.parametrize("background", [(45, 65, 77), (180, 140, 100)])
+@pytest.mark.parametrize(("name", "glow"), [
+    ("new-year-cozy-winter-landscape", {
+        (810, 170): (217, 214, 211, 166),
+        (790, 210): (239, 238, 236, 120),
+        (770, 400): (232, 230, 228, 81),
+        (1400, 500): (227, 224, 223, 31),
+        (1086, 850): (241, 239, 237, 43),
+    }),
+    ("new-year-pine-cones-portrait", {
+        (130, 700): (108, 183, 255, 160),
+        (150, 700): (102, 181, 255, 107),
+        (180, 700): (81, 168, 255, 44),
+        (220, 700): (39, 137, 255, 13),
+        (512, 350): (103, 179, 255, 158),
+        (512, 400): (72, 163, 255, 39),
+    }),
+    ("new-year-fireworks-portrait", {
+        (512, 250): (236, 109, 38, 0),
+        (448, 20): (56, 120, 230, 4),
+        (566, 20): (231, 102, 142, 171),
+        (700, 100): (199, 106, 99, 1),
+        (600, 150): (177, 94, 100, 2),
+        (512, 96): (1, 109, 236, 252),
+    }),
+])
+def test_new_year_frame_retains_its_translucent_inner_glow(name, glow, background):
+    # Native RGBA values at the rounded corners, inner sides and lower edge.
+    # The glow must blend with the photograph rather than become a hard cutout.
+    with Image.new("RGB", (800, 800), background) as original, BytesIO() as jpeg:
+        original.save(jpeg, "JPEG", quality=100, subsampling=0)
+        with (Image.open(BytesIO(jpeg.getvalue())) as decoded,
+              Image.open(ARTWORK / f"{name}.png") as artwork,
+              Image.open(BytesIO(render(name, CATALOG[name].version, jpeg.getvalue(), SEED))) as photo):
+            source = decoded.getpixel((0, 0))
+            for position, rgba in glow.items():
+                assert artwork.getpixel(position) == rgba
+                expected = tuple(round(channel * rgba[3] / 255 + base * (1 - rgba[3] / 255))
+                                 for channel, base in zip(rgba[:3], source, strict=True))
+                assert all(abs(actual - reference) <= 4
+                           for actual, reference in zip(photo.getpixel(position), expected, strict=True))
 
 
 def test_vertical_station_cleans_only_the_faint_exterior_fringe():

@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.ai_photos import AIJob
-from app.creative_renderers import CATALOG, IMAGE_LIMIT, render
+from app.creative_renderers import CATALOG, IMAGE_LIMIT, TreatmentCategory, frame_preview, frame_preview_size, render
 from app.db import Base
 from app.i18n import DEFAULT_LOCALE, Locale, UiMessage, legacy_messages
 from app.media import asset_path, jpeg_dimensions, save_jpeg
@@ -85,8 +85,11 @@ class TreatmentView(BaseModel):
     id: str
     name: str
     description: str
-    category: Literal["treatment", "frame"]
+    category: TreatmentCategory
     result: RenderView | None
+    preview: str | None = None
+    preview_width: int | None = None
+    preview_height: int | None = None
 
 
 def result_view(result: CreativeResult) -> RenderView:
@@ -125,8 +128,20 @@ def options(asset_id: UUID, request: Request, booth_customer: str | None = Cooki
             if legacy:
                 results["classic-filter"] = legacy
         return [TreatmentView(id=key, name=item.name, description=item.description,
-                              category=item.category, result=results.get(key))
+                              category=item.category, result=results.get(key),
+                              **({"preview": f"{router.prefix}/frames/{key}/preview?version={item.version}",
+                                  "preview_width": frame_preview_size(key)[0],
+                                  "preview_height": frame_preview_size(key)[1]} if item.frame_size else {}))
                 for key, item in CATALOG.items()]
+
+
+@router.get("/frames/{treatment}/preview")
+def sample_frame(treatment: str, version: int | None = None):
+    recipe = CATALOG.get(treatment)
+    if recipe is None or recipe.frame_size is None or version is not None and version != recipe.version:
+        raise HTTPException(404, "This treatment is unavailable.")
+    # These public samples contain only bundled artwork and offline sample photography.
+    return Response(content=frame_preview(treatment), media_type="image/jpeg")
 
 
 @router.post("", response_model=RenderView, status_code=202)

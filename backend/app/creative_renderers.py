@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import partial
+from functools import lru_cache, partial
 from io import BytesIO
 from pathlib import Path
 from random import Random
@@ -19,6 +19,14 @@ PRINT_LANDSCAPE = (1800, 1200)
 PRINT_PORTRAIT = (1200, 1800)
 RESAMPLE = Image.Resampling.LANCZOS
 ARTWORK = Path(__file__).with_name("assets")
+NEW_YEAR_PHOTO_BOXES = {
+    "new-year-bright-blue-landscape": (626, 122, 1421, 711),
+    "new-year-vibrant-2027-landscape": (624, 117, 1426, 718),
+    "new-year-cozy-winter-landscape": (716, 156, 1456, 884),
+    "new-year-pine-cones-portrait": (120, 339, 809, 1134),
+    "new-year-fireworks-portrait": (0, 0, 1024, 1536),
+    "new-year-colorful-2027-portrait": (0, 0, 1023, 1538),
+}
 
 
 def classic_filter(jpeg: bytes, _seed: UUID, _locale: Locale = DEFAULT_LOCALE) -> bytes:
@@ -230,6 +238,42 @@ def branded_frame(image: Image.Image, _rng: Random, _locale: Locale, *,
             return canvas.convert("RGB")
 
 
+def place_photo_in_black_opening(artwork: Image.Image, photo: Image.Image) -> Image.Image:
+    red, green, blue = artwork.split()
+    with red, green, blue, ImageChops.lighter(red, green) as warm:
+        with ImageChops.lighter(warm, blue) as peak, peak.point(lambda value: 0 if value <= 12 else 255) as edges:
+            # Key only the dark region connected to the center. The night sky
+            # and the dark details in the artwork keep their original colors.
+            ImageDraw.floodfill(edges, (artwork.width // 2, artwork.height // 2), 128)
+            with (edges.point(lambda value: 255 if value == 128 else 0) as opening,
+                  opening.filter(ImageFilter.MaxFilter(9)) as bleed,
+                  bleed.filter(ImageFilter.GaussianBlur(2)) as feather,
+                  peak.point(lambda value: min(255, max(0, (48 - value) * 255 // 44))) as transmission,
+                  ImageChops.multiply(feather, transmission) as mask,
+                  Image.new("RGB", artwork.size) as black,
+                  Image.composite(photo, black, mask) as visible_photo):
+                # The supplied RGB art already includes the glow against black.
+                return ImageChops.add(artwork, visible_photo)
+
+
+def new_year_frame(image: Image.Image, _rng: Random, _locale: Locale, *, artwork: str) -> Image.Image:
+    with Image.open(ARTWORK / f"{artwork}.png", formats=("PNG",)) as overlay:
+        if box := NEW_YEAR_PHOTO_BOXES.get(artwork):
+            left, top, right, bottom = box
+            # Center the subject in the off-center aperture rather than behind the greeting.
+            with (Image.new("RGBA", overlay.size, "white") as background,
+                  ImageOps.fit(image, (right - left, bottom - top), RESAMPLE, centering=(.5, .35)) as photo):
+                background.paste(photo, (left, top))
+                background.alpha_composite(overlay)
+                return background.convert("RGB")
+        # Keep headroom from the source when fitting a wide layout with a decorated header.
+        with ImageOps.fit(image, overlay.size, RESAMPLE, centering=(.5, 0)) as photo:
+            if overlay.mode == "RGBA":
+                with photo.convert("RGBA") as background, Image.alpha_composite(background, overlay) as result:
+                    return result.convert("RGB")
+            return place_photo_in_black_opening(overlay, photo)
+
+
 def composed(renderer: Callable[[Image.Image, Random, Locale], Image.Image]) -> Callable[[bytes, UUID, Locale], bytes]:
     def from_jpeg(jpeg: bytes, seed: UUID, locale: Locale) -> bytes:
         with Image.open(BytesIO(jpeg), formats=("JPEG",)) as source, BytesIO() as output:
@@ -242,13 +286,17 @@ def composed(renderer: Callable[[Image.Image, Random, Locale], Image.Image]) -> 
     return from_jpeg
 
 
+TreatmentCategory = Literal["treatment", "frame", "new-year-frame"]
+
+
 @dataclass(frozen=True)
 class Treatment:
     name: str
     description: str
     renderer: Callable[[bytes, UUID, Locale], bytes]
     version: int = 1
-    category: Literal["treatment", "frame"] = "treatment"
+    category: TreatmentCategory = "treatment"
+    frame_size: tuple[int, int] | None = None
 
 
 CATALOG = {
@@ -266,6 +314,7 @@ CATALOG = {
         renderer=composed(station_portrait),
         version=5,
         category="frame",
+        frame_size=(1056, 1429),
     ),
 }
 
@@ -281,6 +330,27 @@ for artwork, size, flexible_rows in (
         description=translate(f"{key}.description"),
         renderer=composed(partial(branded_frame, artwork=artwork, size=size, flexible_rows=flexible_rows)),
         category="frame",
+        frame_size=size,
+    )
+
+for artwork in (
+    "new-year-golden-midnight-portrait",
+    "new-year-ornate-2027-portrait",
+    "new-year-winter-garland-landscape",
+    "new-year-winter-drive-blue-landscape",
+    "new-year-winter-drive-red-landscape",
+    *NEW_YEAR_PHOTO_BOXES,
+):
+    key = f"studio.treatment.{artwork}"
+    with Image.open(ARTWORK / f"{artwork}.png", formats=("PNG",)) as overlay:
+        size = overlay.size
+    CATALOG[artwork] = Treatment(
+        name=translate(f"{key}.name"),
+        description=translate(f"{key}.description"),
+        renderer=composed(partial(new_year_frame, artwork=artwork)),
+        version=2 if artwork in {"new-year-cozy-winter-landscape", "new-year-fireworks-portrait"} else 1,
+        category="new-year-frame",
+        frame_size=size,
     )
 
 
@@ -289,3 +359,30 @@ def render(treatment: str, version: int, jpeg: bytes, original_id: UUID, locale:
     if recipe.version != version:
         raise ValueError("This treatment version is unavailable")
     return recipe.renderer(jpeg, original_id, locale)
+
+
+def frame_preview_size(treatment: str) -> tuple[int, int]:
+    size = CATALOG[treatment].frame_size
+    if size is None:
+        raise ValueError("Only frames have sample previews")
+    scale = 360 / max(size)
+    return tuple(round(value * scale) for value in size)
+
+
+@lru_cache(maxsize=32)
+def frame_preview(treatment: str) -> bytes:
+    """Show the production frame on an offline sample, never a customer's photo."""
+    size = frame_preview_size(treatment)
+    recipe = CATALOG[treatment]
+    with Image.open(ARTWORK / "motion-study-sample.jpg") as sample, \
+            sample.crop((0, 0, sample.width // 3, sample.height // 2)) as portrait, BytesIO() as source:
+        # The Hazar brand panels surround a smaller aperture. Position the
+        # demonstration portrait inside that aperture so its face stays visible.
+        top = round(portrait.height * (.7 if size[0] < size[1] else .55)) if recipe.category == "frame" else 0
+        with ImageOps.expand(portrait, border=(0, top, 0, 0), fill=portrait.getpixel((0, 0))) as prepared:
+            prepared.save(source, "JPEG", quality=94)
+        rendered = render(treatment, recipe.version, source.getvalue(), UUID(int=0))
+    with Image.open(BytesIO(rendered)) as composition, composition.resize(size, RESAMPLE) as thumbnail, \
+            BytesIO() as output:
+        thumbnail.save(output, "JPEG", quality=88, subsampling=0)
+        return output.getvalue()

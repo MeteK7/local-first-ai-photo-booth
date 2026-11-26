@@ -17,7 +17,25 @@ const catalog = [
   { id: 'hazar-travel-portrait', name: 'Safe Travels · Portrait', description: '', category: 'frame', result: null },
   { id: 'hazar-travel-landscape', name: 'Safe Travels · Landscape', description: '', category: 'frame', result: null },
   { id: 'hazar-roadside-landscape', name: 'Roadside · Landscape', description: '', category: 'frame', result: null },
-];
+  { id: 'new-year-golden-midnight-portrait', name: 'Golden Midnight · Portrait', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-ornate-2027-portrait', name: 'Ornate 2027 · Portrait', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-pine-cones-portrait', name: 'Festive Pine Cones · Portrait', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-fireworks-portrait', name: 'Fireworks Celebration · Portrait', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-colorful-2027-portrait', name: 'Colorful 2027 · Portrait', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-winter-garland-landscape', name: 'Winter Garland · Landscape', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-winter-drive-blue-landscape', name: 'Winter Drive · Blue Car', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-winter-drive-red-landscape', name: 'Winter Drive · Red Car', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-bright-blue-landscape', name: 'Bright Blue · 2027', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-vibrant-2027-landscape', name: 'Vibrant Celebration · 2027', description: '', category: 'new-year-frame', result: null },
+  { id: 'new-year-cozy-winter-landscape', name: 'Cozy Winter · 2027', description: '', category: 'new-year-frame', result: null },
+].map(item => ({
+  ...item,
+  ...(item.category ? {
+    preview: photos + '/creative/frames/' + item.id + '/preview?version=1',
+    preview_width: item.id.endsWith('-portrait') ? 240 : 360,
+    preview_height: item.id.endsWith('-portrait') ? 360 : 240,
+  } : {}),
+}));
 
 async function setUp() {
   TestBed.configureTestingModule({ providers: [provideTranslateService(), provideHttpClient(), provideHttpClientTesting()] });
@@ -26,7 +44,7 @@ async function setUp() {
   const http = TestBed.inject(HttpTestingController);
   const element = fixture.nativeElement as HTMLElement;
   const button = (label: string) => Array.from(element.querySelectorAll('button'))
-    .find(item => item.textContent.trim() === label)!;
+    .find(item => item.getAttribute('aria-label') === label || item.textContent.trim() === label)!;
   fixture.detectChanges();
   http.expectOne(photos + '/creative?asset_id=source').flush(catalog);
   http.expectOne(photos + '/print-jobs?asset_id=source&kind=original').flush(null);
@@ -34,27 +52,50 @@ async function setUp() {
     fixture.detectChanges();
     expect(button('Original').disabled).toBe(false);
   });
-  return { fixture, http, element, button };
+  const completeTreatment = async (treatment: string, id: string) => {
+    const request = http.expectOne(photos + '/creative');
+    expect(request.request.body).toMatchObject({ asset_id: 'source', treatment });
+    request.flush({ id, kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    http.expectOne(photos + '/print-jobs?asset_id=' + id + '&kind=creative').flush(null);
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(button('Original').disabled).toBe(false);
+    });
+  };
+  return { fixture, http, element, button, completeTreatment };
 }
 
 describe('Creative Studio', () => {
-  it('opens the Hazar frame choices from a single button without changing the photo', async () => {
-    const { fixture, http, element, button } = await setUp();
+  it('selects the first Hazar frame when opening the collection and keeps the chosen frame when closing it', async () => {
+    const { fixture, http, element, button, completeTreatment } = await setUp();
     const toggle = button('Hazar Frames');
     const frames = element.querySelector<HTMLElement>('#studio-hazar-options')!;
     expect(toggle.parentElement).toBe(button('Portrait Atlas').parentElement);
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(frames.hidden).toBe(true);
+    expect(element.querySelectorAll('.studio-frame-preview img').length).toBe(0);
     toggle.click();
     fixture.detectChanges();
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(frames.hidden).toBe(false);
     expect(Array.from(frames.querySelectorAll('button'), item => item.textContent.trim())).toEqual([
-      'Station · Portrait', 'Station · Landscape', 'Safe Travels · Portrait', 'Safe Travels · Landscape',
+      'Station · Portrait', 'Safe Travels · Portrait', 'Station · Landscape', 'Safe Travels · Landscape',
       'Roadside · Landscape',
     ]);
-    expect(button('Original').getAttribute('aria-pressed')).toBe('true');
-    http.expectNone(request => request.method === 'POST');
+    const thumbnails = Array.from(frames.querySelectorAll<HTMLImageElement>('.studio-frame-preview img'));
+    expect(thumbnails.length).toBe(5);
+    expect(thumbnails.map(image => image.getAttribute('src'))).toEqual([
+      'hazar-station-portrait', 'hazar-travel-portrait', 'hazar-station-landscape',
+      'hazar-travel-landscape', 'hazar-roadside-landscape',
+    ].map(id => photos + '/creative/frames/' + id + '/preview?version=1'));
+    expect(thumbnails.map(image => Number(image.width) > Number(image.height))).toEqual([false, false, true, true, true]);
+    expect(button('Original').getAttribute('aria-pressed')).toBe('false');
+    expect(button('Station · Portrait').getAttribute('aria-pressed')).toBe('true');
+    expect(element.querySelector('.photo-stage img')).toBeNull();
+    await completeTreatment('hazar-station-portrait', 'station');
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/station/preview');
     button('Roadside · Landscape').click();
     const request = http.expectOne(photos + '/creative');
     expect(request.request.body).toMatchObject({ asset_id: 'source', treatment: 'hazar-roadside-landscape' });
@@ -62,7 +103,7 @@ describe('Creative Studio', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     http.expectOne(photos + '/print-jobs?asset_id=roadside&kind=creative').flush(null);
-    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/roadside/preview');
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/roadside/preview');
     expect(button('Roadside · Landscape').getAttribute('aria-pressed')).toBe('true');
     await vi.waitFor(() => {
       fixture.detectChanges();
@@ -71,14 +112,74 @@ describe('Creative Studio', () => {
     toggle.click();
     fixture.detectChanges();
     expect(frames.hidden).toBe(true);
-    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/roadside/preview');
+    expect(element.querySelectorAll('.studio-frame-preview img').length).toBe(0);
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/roadside/preview');
+    toggle.click();
+    fixture.detectChanges();
+    expect(frames.hidden).toBe(false);
+    expect(button('Roadside · Landscape').getAttribute('aria-pressed')).toBe('true');
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/roadside/preview');
+    http.expectNone(request => request.method === 'POST');
+    http.verify();
+    fixture.destroy();
+  });
+
+  it.each([
+    ['The Film Frame', 'film-frame', 'completed'],
+    ['The Film Frame', 'film-frame', 'in-flight'],
+    ['Hazar Frames', 'hazar-station-portrait', 'completed'],
+  ])('replaces %s with New Year frames (%s, %s)', async (source, treatment, state) => {
+    const { fixture, http, element, button, completeTreatment } = await setUp();
+    button(source).click();
+    if (state === 'completed') await completeTreatment(treatment, 'previous');
+    const pending = state === 'in-flight' ? http.expectOne(photos + '/creative') : undefined;
+    fixture.detectChanges();
+    if (state === 'completed') {
+      expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/previous/preview');
+    }
+
+    const newYear = button('New Year Frames');
+    newYear.click();
+    fixture.detectChanges();
+    const render = http.expectOne(photos + '/creative');
+    expect(render.request.body).toMatchObject({ asset_id: 'source', treatment: 'new-year-golden-midnight-portrait' });
+    expect(fixture.componentInstance.selected()).toBe('new-year-golden-midnight-portrait');
+    expect(newYear.classList.contains('studio-frame-active')).toBe(true);
+    expect(button('The Film Frame').getAttribute('aria-pressed')).toBe('false');
+    expect(button('Hazar Frames').getAttribute('aria-expanded')).toBe('false');
+    expect(element.querySelector('.studio-caption h3')?.textContent?.trim()).toBe('Golden Midnight · Portrait');
+    expect(element.querySelector('.photo-stage img')).toBeNull();
+    expect(element.querySelector('.result-actions')).toBeNull();
+    expect(element.textContent).toContain('Preparing your photo');
+
+    render.flush({ id: 'new-year', kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
+    // A late result from the old effect must not take over the newly selected frame.
+    pending?.flush({ id: 'previous', kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    http.expectOne(photos + '/print-jobs?asset_id=new-year&kind=creative').flush(null);
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(newYear.disabled).toBe(false);
+    });
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/new-year/preview');
+    expect(element.querySelector('a[download]')?.getAttribute('href')).toBe(photos + '/creative/new-year/download');
+    newYear.click();
+    fixture.detectChanges();
+    expect(newYear.getAttribute('aria-expanded')).toBe('false');
+    newYear.click();
+    fixture.detectChanges();
+    expect(newYear.getAttribute('aria-expanded')).toBe('true');
+    expect(fixture.componentInstance.selected()).toBe('new-year-golden-midnight-portrait');
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/new-year/preview');
+    http.expectNone(request => request.method === 'POST');
     http.verify();
     fixture.destroy();
   });
 
   it('uses the latest selection for preview, download, phone QR and printing', async () => {
     const { fixture, http, element, button } = await setUp();
-    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/source/preview');
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/source/preview');
     button('The Film Frame').click();
     const film = http.expectOne(photos + '/creative');
     expect(film.request.body).toEqual({ asset_id: 'source', treatment: 'film-frame', locale: 'en' });
@@ -98,7 +199,7 @@ describe('Creative Studio', () => {
       fixture.detectChanges();
       expect(button('Print').disabled).toBe(false);
     });
-    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/creative/parallel/preview');
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/parallel/preview');
     expect(element.querySelector('a[download]')?.getAttribute('href')).toBe(photos + '/creative/parallel/download');
     button('Download on phone').click();
     const phone = http.expectOne(photos + '/phone-links');
@@ -118,8 +219,55 @@ describe('Creative Studio', () => {
     button('Original').click();
     fixture.detectChanges();
     http.expectOne(photos + '/print-jobs?asset_id=source&kind=original').flush(null);
-    expect(element.querySelector('img')?.getAttribute('src')).toBe(photos + '/source/preview');
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/source/preview');
     expect(element.querySelector('.phone-download')).toBeNull();
+    http.verify();
+    fixture.destroy();
+  });
+
+  it.each([
+    ['Winter Drive · Red Car', 'new-year-winter-drive-red-landscape'],
+    ['Bright Blue · 2027', 'new-year-bright-blue-landscape'],
+    ['Vibrant Celebration · 2027', 'new-year-vibrant-2027-landscape'],
+    ['Cozy Winter · 2027', 'new-year-cozy-winter-landscape'],
+    ['Festive Pine Cones · Portrait', 'new-year-pine-cones-portrait'],
+    ['Fireworks Celebration · Portrait', 'new-year-fireworks-portrait'],
+    ['Colorful 2027 · Portrait', 'new-year-colorful-2027-portrait'],
+  ])('opens the New Year collection and selects %s', async (label, treatment) => {
+    const { fixture, http, element, button, completeTreatment } = await setUp();
+    const newYear = button('New Year Frames');
+    const hazar = button('Hazar Frames');
+    const frames = element.querySelector<HTMLElement>('#studio-new-year-options')!;
+    expect(newYear.getAttribute('aria-expanded')).toBe('false');
+    expect(frames.hidden).toBe(true);
+    newYear.click();
+    fixture.detectChanges();
+    expect(hazar.getAttribute('aria-expanded')).toBe('false');
+    expect(newYear.getAttribute('aria-expanded')).toBe('true');
+    expect(frames.hidden).toBe(false);
+    const thumbnails = Array.from(frames.querySelectorAll<HTMLImageElement>('.studio-frame-preview img'));
+    expect(thumbnails.length).toBe(11);
+    expect(thumbnails.every(image => image.getAttribute('src')?.includes('/frames/new-year-'))).toBe(true);
+    expect(thumbnails.map(image => Number(image.width) > Number(image.height))).toEqual([
+      false, false, false, false, false, true, true, true, true, true, true,
+    ]);
+    expect(Array.from(frames.querySelectorAll('button'), item => item.textContent.trim())).toEqual([
+      'Golden Midnight · Portrait', 'Ornate 2027 · Portrait', 'Festive Pine Cones · Portrait',
+      'Fireworks Celebration · Portrait', 'Colorful 2027 · Portrait', 'Winter Garland · Landscape',
+      'Winter Drive · Blue Car', 'Winter Drive · Red Car',
+      'Bright Blue · 2027', 'Vibrant Celebration · 2027', 'Cozy Winter · 2027',
+    ]);
+    await completeTreatment('new-year-golden-midnight-portrait', 'golden');
+    expect(button('Golden Midnight · Portrait').getAttribute('aria-pressed')).toBe('true');
+    button(label).click();
+    const render = http.expectOne(photos + '/creative');
+    expect(render.request.body).toMatchObject({ asset_id: 'source', treatment });
+    render.flush({ id: 'red-drive', kind: 'creative', state: 'completed', detail: 'Your treatment is ready.' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+    http.expectOne(photos + '/print-jobs?asset_id=red-drive&kind=creative').flush(null);
+    expect(element.querySelector('.photo-stage img')?.getAttribute('src')).toBe(photos + '/creative/red-drive/preview');
+    expect(element.querySelector('a[download]')?.getAttribute('href')).toBe(photos + '/creative/red-drive/download');
     http.verify();
     fixture.destroy();
   });

@@ -1,0 +1,45 @@
+{
+  "tool": "Built-in image_gen",
+  "use_case": "background-extraction",
+  "method": "Bright Blue and Vibrant Celebration use generated alpha with original supplied RGB pixels. Cozy Winter and Fireworks Celebration use supplied RGBA PNGs unchanged. Pine Cones reconstructs the original sky-blue fade from its black matte. See prepare-new-year-single.py.",
+  "edits": [
+    {
+      "artwork": "new-year-bright-blue-landscape",
+      "source": "Bright Blue New Year Photo Frame.png",
+      "prompt": "Use case: background-extraction. Edit target: the supplied 1536x1024 New Year photo frame. Create a production transparent PNG overlay. Make ONLY the large rounded rectangular photo window on the right, removing ALL printed checkerboard squares fully transparent edge-to-edge inside its frame. The whole photo aperture must be a clean alpha-zero cutout including close to its inner boundary, with crisp antialiased contours. Every pixel outside the photo aperture must remain opaque: retain original light backdrop, all artwork, the Happy New Year 2027 lettering, colors, decorations, size, exact composition, border curves and perspective unchanged. Do not invent, redraw, shift or crop any artwork. Do not replace the window with white, gray, black or a checkerboard: it must be genuinely transparent. Preserve the entire canvas."
+    },
+    {
+      "artwork": "new-year-vibrant-2027-landscape",
+      "source": "Vibrant 2027 New Year Celebration Frame.png",
+      "prompt": "Use case: background-extraction. Edit target: the supplied 1536x1024 New Year photo frame. Create a production transparent PNG overlay. Make ONLY the large rounded rectangular photo window on the right, removing ALL dark black/gray placeholder fill fully transparent edge-to-edge inside its frame. The whole photo aperture must be a clean alpha-zero cutout including close to its inner boundary, with crisp antialiased contours. Every pixel outside the photo aperture must remain opaque: retain original light backdrop, all artwork, the Happy New Year 2027 lettering, colors, decorations, size, exact composition, border curves and perspective unchanged. Do not invent, redraw, shift or crop any artwork. Do not replace the window with white, gray, black or a checkerboard: it must be genuinely transparent. Preserve the entire canvas."
+    },
+    {
+      "artwork": "new-year-cozy-winter-landscape",
+      "source": "Happy New Year 2027 Frame.png",
+      "method": "Original supplied RGBA PNG copied byte-for-byte; original alpha channel saved as the reusable mask. No image generation, alpha cleanup, thresholding or glow removal is applied."
+    },
+    {
+      "artwork": "new-year-pine-cones-portrait",
+      "source": "Festive New Year Frame with Pine Cones.png",
+      "prompt": "Use case: background-extraction. Edit target: the supplied 1024x1536 portrait New Year frame. Produce a production RGBA photo overlay at exactly the same 1024x1536 resolution and alignment. Change ONLY the black placeholder inside the large rounded sky-blue rectangle into genuine alpha transparency. CRITICAL: preserve the soft semi-transparent sky-blue inner glow/transition around every inner edge and rounded corner. The glow is flattened over black in the input: reconstruct a luminous sky-blue foreground with gradually fading alpha toward the center, so a photograph behind it remains visible through the blue fade. The central black fill must become fully alpha-zero; no black fringe or opaque dark gradient may remain. Preserve the original outer bright blue rim, exact shape, all lettering 'Happy New Year' and '2027', balloons, ribbons, gifts, pine cones, Christmas trees, white background, positions and colors outside the photo aperture. All artwork and background outside the photo opening stay opaque. Do not redraw, crop, shift, rescale or add anything. Do not create a checkerboard, gray or white placeholder. Deliver real transparency with a smooth sky-blue alpha transition.",
+      "method": "The generated cutout identifies the photo aperture. Within its inner rounded window, blue-channel opacity is recovered from the original black matte (RGB 0,0,2); the foreground is unpremultiplied and the full 8-bit alpha fade is retained. Original RGB pixels outside the aperture are unchanged. The checked-in grayscale alpha is reusable without image generation."
+    },
+    {
+      "artwork": "new-year-fireworks-portrait",
+      "source": "codex-clipboard-620be90f-086b-4449-83bc-3f5dd83c7701.png (supplied RGBA correction)",
+      "import_filename": "2027 Celebration Beneath Fireworks (1).png",
+      "source_sha256": "a15c87c71219af1e256d1cb80e3710eb77f466b021adeb3d5172e028ec175474",
+      "method": "Supplied RGBA PNG copied byte-for-byte. All RGB and alpha values, including the top-region transparency and soft transitions, remain unchanged. No image generation, alpha thresholding, or opaque header is applied. The photograph covers the full canvas; render version 2 refreshes earlier results."
+    },
+    {
+      "artwork": "new-year-colorful-2027-portrait",
+      "source": "Enlarged Colorful 2027 Celebration.png",
+      "native_size": [
+        1023,
+        1538
+      ],
+      "prompt": "Use case: background-extraction. Edit target: the attached portrait artwork 'Enlarged Colorful 2027 Celebration.png', native dimensions 1023x1538. Produce an aligned transparent PNG photo-frame overlay. Remove ONLY the black/near-black middle photo-placeholder background, including its black gaps between the colorful decorations. Keep ALL white, ivory, cream, pastel and light decorative backgrounds COMPLETELY OPAQUE. The white header behind the fireworks and bells, white holes above the black region inside the 2027 digits, pale outer corners, and every colorful decoration must remain opaque. Do not remove white or cream anywhere. Keep colored 2027 text, balloons, balloon strings, stars, snowflakes, confetti, trees, gifts and ribbons exactly intact at their original positions and colors. Preserve any thin black outer canvas border; the removable area is the black photo opening connected to the center. Use crisp antialiased silhouette boundaries, no broad blur, no translucent vignette, no glow, no color fade or redesign. Do not add checkerboard or another placeholder: the black middle must be real alpha-zero transparency. Preserve full original alignment and canvas size if possible. Change only the black photo opening; leave the outer white decoration opaque.",
+      "method": "Built-in imagegen supplies only the black photo-opening mask. Only that mask is aligned to the original 1023x1538 canvas; all supplied RGB pixels are retained exactly. White, cream and colored decoration pixels are protected and remain fully opaque. Only the black/near-black center can become transparent, with edge antialiasing. The thin outer black canvas border remains opaque."
+    }
+  ]
+}

@@ -25,6 +25,7 @@ from app.media import asset_path, save_jpeg, save_original
 from app.photos import Filmstrip, OriginalPhoto
 from app import printing
 from app.ai_photos import AIJob
+from app.creative import CreativeResult
 from app.creative_renderers import CATALOG, render
 from app.security import hash_password, token_digest
 
@@ -348,6 +349,14 @@ def sculpture_jpeg(slot):
     ("motion-study", {"count": 4, "layout": "match-cut"}, (1800, 1200), "Photo", False),
     ("motion-study", {"count": 6, "layout": "ascending-cut"}, (1800, 1200), "Photo", False),
     ("mini-scene", {"count": 4}, (1800, 1200), "Photo", False),
+    *[("new-year", {"count": count, "template": template}, (1200, 1800), "Photo", False)
+      for template, count in (("midnight-memories", 4), ("fresh-chapter", 5),
+                              ("party-after-dark", 4), ("sparkle-season", 4), ("radiant-welcome", 4),
+                              ("hello-2027", 4), ("welcome-celebration", 4), ("champagne-cheers", 4),
+                              ("new-years-eve", 4))],
+    ("new-year", {"count": 4, "template": "glittering-welcome"}, (1800, 1200), "Photo", False),
+    *[pytest.param("new-year", {"count": 4, "template": template}, (1800, 1200), "Photo", False, id=template)
+      for template in ("burgundy-celebration", "retro-confetti", "aurora-celebration")],
     pytest.param("time-sculpture", {"count": 4}, (1800, 1200), "Photo", True, id="sculpture-fallback"),
     pytest.param("time-sculpture", {"count": 4}, (1800, 1200), "Photo", False, id="sculpture-composite"),
 ])
@@ -503,7 +512,14 @@ def test_creative_results_are_local_and_deliver_the_selected_jpeg(settings, monk
         settings.printer_name = "Isolated test queue"
         options = owner.get(STUDIO, params={"asset_id": source}).raise_for_status().json()
         assert [option["id"] for option in options] == list(CATALOG)
+        assert [option["category"] for option in options] == [item.category for item in CATALOG.values()]
         assert all(option["result"] is None for option in options)
+        for option in options:
+            if option["category"] == "treatment":
+                assert option["preview"] is None
+            else:
+                assert option["preview"].startswith(f"{STUDIO}/frames/{option['id']}/preview?version=")
+                assert max(option["preview_width"], option["preview_height"]) == 360
         assert other.get(STUDIO, params={"asset_id": source}).status_code == 404
         assert owner.post(f"{PHOTOS}/ai", json={}, headers=HEADERS).status_code == 404
 
@@ -531,7 +547,7 @@ def test_creative_results_are_local_and_deliver_the_selected_jpeg(settings, monk
         assert len(set(ids)) == len(set(outputs)) == len(CATALOG)
         assert asset_path(settings.data_root, "originals", source).read_bytes() == original
 
-        frame_index = list(CATALOG).index("hazar-travel-portrait")
+        frame_index = list(CATALOG).index("new-year-cozy-winter-landscape")
         selected = {"asset_id": ids[frame_index], "kind": "creative"}
         assert other.post(PHONE_LINKS, json=selected, headers=HEADERS).status_code == 404
         assert other.post(PRINT_JOBS, json=selected, headers=HEADERS).status_code == 404
@@ -553,6 +569,34 @@ def test_creative_results_are_local_and_deliver_the_selected_jpeg(settings, monk
             assert link.creative_id == UUID(ids[frame_index])
             link.expires_at = datetime.now(UTC) - timedelta(seconds=1)
         assert phone.get(path).status_code == 404
+
+
+def test_cozy_winter_restoration_refreshes_the_previous_render_version(settings):
+    app = create_app(settings)
+    name = "new-year-cozy-winter-landscape"
+    original = sample_jpeg()
+    with TestClient(app, base_url=BASE) as owner:
+        session = owner.post("/api/sessions", headers=HEADERS).raise_for_status().json()
+        source = seed_original(app, settings, session["id"], original)
+        previous_id = uuid4()
+        with app.state.db.begin() as db:
+            db.add(CreativeResult(
+                id=previous_id, original_id=source, treatment=name, version=1, state="completed",
+                detail="Your treatment is ready.", render_locale="en", updated_at=datetime.now(UTC),
+                byte_size=len(original), width=720, height=480,
+            ))
+        save_jpeg(settings.data_root, "processed", previous_id, original)
+        choices = owner.get(STUDIO, params={"asset_id": source}).raise_for_status().json()
+        assert next(choice for choice in choices if choice["id"] == name)["result"] is None
+        queued = owner.post(STUDIO, json={"asset_id": str(source), "treatment": name}, headers=HEADERS)
+        assert queued.status_code == 202 and queued.json()["id"] != str(previous_id)
+        result = wait_for_result(owner, source, name, "completed")
+        with app.state.db() as db:
+            assert db.get(CreativeResult, UUID(result["id"])).version == CATALOG[name].version == 2
+            assert db.get(CreativeResult, previous_id).version == 1
+        restored = owner.get(f"{STUDIO}/{result['id']}/download").raise_for_status().content
+        assert restored == render(name, 2, original, source)
+        assert asset_path(settings.data_root, "processed", previous_id).read_bytes() == original
 
 
 def test_creative_failure_can_retry_and_filmstrip_cannot_request_treatments(settings):

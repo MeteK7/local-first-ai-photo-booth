@@ -77,10 +77,45 @@ class TimeSculpturePlan(BaseModel):
     count: Literal[4] = 4
 
 
+class NewYearTemplate(StrEnum):
+    MIDNIGHT_MEMORIES = "midnight-memories"
+    FRESH_CHAPTER = "fresh-chapter"
+    PARTY_AFTER_DARK = "party-after-dark"
+    SPARKLE_SEASON = "sparkle-season"
+    RADIANT_WELCOME = "radiant-welcome"
+    HELLO_2027 = "hello-2027"
+    GLITTERING_WELCOME = "glittering-welcome"
+    WELCOME_CELEBRATION = "welcome-celebration"
+    CHAMPAGNE_CHEERS = "champagne-cheers"
+    NEW_YEARS_EVE = "new-years-eve"
+    BURGUNDY_CELEBRATION = "burgundy-celebration"
+    RETRO_CONFETTI = "retro-confetti"
+    AURORA_CELEBRATION = "aurora-celebration"
+
+    @property
+    def count(self) -> int:
+        return 5 if self == NewYearTemplate.FRESH_CHAPTER else 4
+
+
+class NewYearPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    experience: Literal["new-year"] = "new-year"
+    version: Literal[1] = 1
+    template: NewYearTemplate
+    count: int = Field(default=4, ge=4, le=5, strict=True)
+
+    @model_validator(mode="after")
+    def validate_template_count(self):
+        if self.count != self.template.count:
+            raise ValueError("The number of photos must match the New Year template.")
+        return self
+
+
 MINI_SCENE_BEATS = ("Setup", "Action", "Reaction", "Ending")
 SCULPTURE_POSITIONS = ("Left", "Center", "Right")
 CreativePlan = BetweenFramesPlan | MotionStudyPlan | MiniScenePlan | TimeSculpturePlan
-CapturePlan = SignatureStripPlan | CreativePlan
+CapturePlan = SignatureStripPlan | CreativePlan | NewYearPlan
 
 DEFAULT_PLAN = SignatureStripPlan()
 LEGACY_STRIP_FILENAME = "classic-filmstrip.jpg"
@@ -113,6 +148,8 @@ def directions(experience: str, prompts: tuple[str, ...] = (), *, transfer: str 
 
 
 def capture_directions(plan: CapturePlan) -> CaptureDirections:
+    if isinstance(plan, NewYearPlan):
+        return directions(plan.experience)
     if isinstance(plan, BetweenFramesPlan):
         poses = ("calm", "gaze", "laugh") if plan.count == 3 else ("calm", "laugh")
         return directions(plan.experience, tuple(f"studio.between.{pose}" for pose in poses) if plan.guided else ())

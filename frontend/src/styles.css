@@ -151,12 +151,24 @@ p, dt { color: var(--muted); line-height: 1.6; }
 .shell:has(.multi-photo) { padding-block: clamp(18px, 3vh, 36px); }
 .multi-photo { max-width: 860px; margin-inline: auto; padding-block: clamp(22px, 4vh, 40px); }
 .multi-photo-header h1 { margin-block-end: 12px; }
-.multi-photo-collections { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+.multi-photo-collections { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 10px; }
 .multi-photo-collection { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; }
 .multi-photo-creative-modes { grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); }
 .multi-photo-collection h2 { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: .85rem; }
 .multi-photo-collection button { padding-inline: 9px; line-height: 1.2; text-align: center; }
 .multi-photo-description { margin: 15px 0 0; }
+.multi-new-year-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.multi-new-year-template { display: grid; justify-items: center; align-content: start; gap: 7px; padding: 8px; text-align: center; }
+.multi-new-year-template img { display: block; width: 100%; height: auto; border-radius: 3px; }
+.multi-new-year-template span { font-size: .87rem; line-height: 1.25; }
+.multi-new-year-template small { color: var(--muted); font-size: .77rem; }
+.multi-new-year-preview {
+  /* Use the same longest edge for both orientations, including on narrow screens. */
+  display: block; width: calc(min(100%, 540px) * var(--new-year-preview-width-ratio)); height: auto; object-fit: contain;
+}
+@media (max-width: 600px) {
+  .multi-new-year-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .multi-photo-field { margin-block-start: 22px; }
 .multi-photo-field h3 { font-size: 1rem; margin: 0 0 10px; }
 .multi-photo-counts, .multi-photo-layouts { display: grid; gap: 8px; }
@@ -300,7 +312,8 @@ p, dt { color: var(--muted); line-height: 1.6; }
   display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr));
   gap: 8px; margin-bottom: 16px;
 }
-.studio-treatments .secondary[aria-pressed="true"], .studio-treatments .studio-frame-active {
+.studio-treatments .secondary[aria-pressed="true"], .studio-treatments .studio-frame-active,
+.studio-frame-options .secondary[aria-pressed="true"] {
   background: var(--primary); border-color: var(--primary-border); color: var(--primary-text);
 }
 .studio-frame-toggle { gap: 8px; }
@@ -309,6 +322,76 @@ p, dt { color: var(--muted); line-height: 1.6; }
   border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 .studio-frame-toggle[aria-expanded="true"] .studio-frame-chevron { transform: rotate(225deg); }
+.studio, .multi-photo { container-name: studio; container-type: inline-size; }
+.studio-treatments:has(.new-year-frame-button) {
+  grid-template-columns: minmax(0, 4fr); grid-auto-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(112px, auto); grid-auto-flow: column; gap: 12px; margin-top: 24px;
+}
+.studio-treatments:has(.new-year-frame-button) > .secondary:not(.new-year-frame-button) {
+  min-width: 0; min-height: 64px; padding-inline: 8px; line-height: 1.25;
+  text-wrap: balance; overflow-wrap: anywhere;
+}
+.studio-treatments:has(.new-year-frame-button) > .studio-frame-toggle:not(.new-year-frame-button) {
+  flex-direction: column; gap: 6px;
+}
+.multi-photo-collections:has(.new-year-frame-button) {
+  grid-template-columns: minmax(220px, 4fr) minmax(0, 1.5fr) minmax(0, 4.5fr);
+  grid-template-rows: auto minmax(112px, 1fr); gap: 24px 12px;
+}
+.multi-photo-collections:has(.new-year-frame-button) .multi-photo-collection {
+  /* Share header and button rows so wrapped collection names keep the buttons aligned. */
+  grid-row: span 2; grid-template-rows: subgrid;
+}
+.multi-photo-collections:has(.new-year-frame-button) .multi-photo-creative-modes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.studio .studio-treatments > .new-year-frame-button,
+.multi-photo-collections .multi-new-year-collection > .new-year-frame-button { margin-top: 0; }
+@container studio (max-width: 840px) {
+  .studio-treatments:has(.new-year-frame-button) {
+    grid-template-columns: minmax(0, 4fr) repeat(3, minmax(0, 2fr));
+    grid-template-rows: repeat(2, minmax(68px, 1fr));
+  }
+  .studio-treatments .new-year-frame-button { grid-row: 1 / -1; }
+}
+@container studio (max-width: 660px) {
+  .multi-photo-collections:has(.new-year-frame-button) {
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 16px;
+  }
+  .multi-photo-collections:has(.new-year-frame-button) .multi-photo-collection {
+    grid-row: auto; grid-template-rows: auto minmax(60px, auto); row-gap: 24px;
+  }
+}
+@container studio (max-width: 560px) {
+  .studio-treatments:has(.new-year-frame-button) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(100px, auto) repeat(2, minmax(68px, 1fr));
+  }
+  .studio-treatments .new-year-frame-button { grid-column: 1 / -1; grid-row: 1; }
+}
+.studio-frame-options {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px;
+}
+.studio .studio-frame-template {
+  display: grid; justify-items: center; align-content: start; gap: 8px; min-width: 0; padding: 8px;
+  text-align: center; font-size: .87rem;
+}
+.studio-frame-preview {
+  display: flex; align-items: center; justify-content: center; width: 100%; height: 170px;
+  border-radius: 4px; background: #1a2332;
+}
+.studio-frame-preview img { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; border-radius: 3px; }
+@media (min-width: 1100px) {
+  .shell:has(.multi-new-year-options) { width: 100%; }
+  .multi-photo:has(.multi-new-year-options) { max-width: none; }
+  /* Preserve the original cards: (860px panel - 110px padding - 2px border - 30px gaps) / 4. */
+  .multi-new-year-options { grid-template-columns: repeat(auto-fill, 179.5px); }
+}
+@media (min-width: 1440px) {
+  .shell:has(#studio-new-year-options:not([hidden])) { width: 100%; }
+  /* Preserve the original cards: (1280px shell - 144px shell padding - 110px panel padding - 2px border - 30px gaps) / 4. */
+  #studio-new-year-options .studio-frame-options { grid-template-columns: repeat(auto-fill, 248.5px); }
+}
 .studio-caption :is(h3, p) { margin: 0 0 8px; }
 .studio-caption h3 { font-size: 1rem; }
 .studio-caption p { font-size: .91rem; }
@@ -339,6 +422,8 @@ th { color: var(--muted); font-size: .9rem; }
   .lens { width: 55%; }
 }
 @media (max-width: 600px) {
+  .studio-frame-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .studio-frame-preview { height: 140px; }
   .multi-photo-collections { grid-template-columns: 1fr; }
   .session-header { margin-block-end: 18px; }
   .session .capture-action { width: 100%; }

@@ -17,7 +17,8 @@ from app.db import Base
 from app.filmstrip import dimensions, render_filmstrip
 from app.i18n import DEFAULT_LOCALE, Locale, LocalizedError, UiMessage, legacy_messages
 from app.media import asset_path, jpeg_dimensions, save_jpeg, save_original
-from app.multi_photo import MAX_FRAMES, SignatureStripPlan, TimeSculpturePlan, print_layout
+from app.multi_photo import MAX_FRAMES, NewYearPlan, SignatureStripPlan, TimeSculpturePlan, print_layout
+from app.new_year_multi import print_size as new_year_print_size, render_new_year
 from app.sessions import BoothSession, Experience, active_session
 from app.time_sculpture import render_time_sculpture
 
@@ -178,10 +179,12 @@ def compose_filmstrip(request: Request, body: ComposeRequest | None = None,
                 jpeg, fallback = sculpture.jpeg, sculpture.fallback_reason
             elif isinstance(plan, SignatureStripPlan):
                 jpeg = render_filmstrip(paths, plan)
+            elif isinstance(plan, NewYearPlan):
+                jpeg = render_new_year(paths, plan)
             else:
                 jpeg = render_creative_sequence(paths, plan, locale)
             layout = print_layout(plan)
-            width, height = dimensions(layout)
+            width, height = new_year_print_size(plan.template) if isinstance(plan, NewYearPlan) else dimensions(layout)
             result = existing or Filmstrip(
                 id=uuid4(), session_id=session.id, width=width, height=height,
                 created_at=datetime.now(UTC), layout=layout if session.multi_photo_plan is not None else None,

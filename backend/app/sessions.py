@@ -15,8 +15,10 @@ from app.i18n import DEFAULT_LOCALE, Locale, translate
 from app.motion_study import MOTION_DESIGNS, motion_preview
 from app.multi_photo import (
     DEFAULT_PLAN, LEGACY_STRIP_FILENAME, MAX_FRAMES, MIN_FRAMES, BetweenFramesPlan, CaptureDirections, CapturePlan,
-    MiniScenePlan, MotionStudyLayout, MotionStudyPlan, SignatureStripPlan, StripLayout, TimeSculpturePlan, capture_directions,
+    MiniScenePlan, MotionStudyLayout, MotionStudyPlan, NewYearPlan, NewYearTemplate, SignatureStripPlan,
+    StripLayout, TimeSculpturePlan, capture_directions,
 )
+from app.new_year_multi import new_year_preview, preview_size, print_size as new_year_print_size
 from app.security import issue_token, token_digest
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -130,6 +132,13 @@ def multi_photo_studio(request: Request):
     return {
         "default_plan": DEFAULT_PLAN,
         "counts": list(range(MIN_FRAMES, MAX_FRAMES + 1)),
+        "new_year": [
+            {"id": template, "default_plan": NewYearPlan(template=template, count=template.count),
+             "preview": f"/api/sessions/multi-photo-studio/new-year/{template}/preview",
+             "size": "6 × 4 in" if new_year_print_size(template)[0] > new_year_print_size(template)[1] else "4 × 6 in",
+             "preview_width": preview_size(template)[0], "preview_height": preview_size(template)[1]}
+            for template in NewYearTemplate
+        ],
         "motion_layouts": [
             {"id": layout, "name": design.name, "description": design.description, "counts": layout.counts,
              "previews": {count: f"/api/sessions/multi-photo-studio/motion-study/{layout}/{count}/preview"
@@ -176,6 +185,11 @@ def preview_motion_layout(layout: MotionStudyLayout, count: int, locale: Locale 
         raise HTTPException(404, "This layout has no preview for that number of photos.")
     return Response(content=motion_preview(layout, count, locale), media_type="image/jpeg",
                     headers={"Content-Language": locale})
+
+
+@router.get("/multi-photo-studio/new-year/{template}/preview")
+def preview_new_year(template: NewYearTemplate):
+    return Response(content=new_year_preview(template), media_type="image/jpeg")
 
 
 @router.post("", response_model=SessionView, status_code=201)

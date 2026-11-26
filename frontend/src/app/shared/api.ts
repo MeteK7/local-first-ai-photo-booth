@@ -56,7 +56,27 @@ export interface StoryPlan {
 }
 
 export type CreativePlan = BetweenFramesPlan | MotionStudyPlan | StoryPlan;
-export type CapturePlan = SignatureStripPlan | CreativePlan;
+export type NewYearTemplate = 'midnight-memories' | 'fresh-chapter' | 'party-after-dark' | 'sparkle-season'
+  | 'radiant-welcome' | 'hello-2027' | 'glittering-welcome' | 'welcome-celebration' | 'champagne-cheers' | 'new-years-eve'
+  | 'burgundy-celebration' | 'retro-confetti' | 'aurora-celebration';
+
+export interface NewYearPlan {
+  experience: 'new-year';
+  version: 1;
+  template: NewYearTemplate;
+  count: number;
+}
+
+export interface NewYearChoice {
+  id: NewYearTemplate;
+  default_plan: NewYearPlan;
+  preview: string;
+  preview_width?: number;
+  preview_height?: number;
+  size: string;
+}
+
+export type CapturePlan = SignatureStripPlan | CreativePlan | NewYearPlan;
 
 export interface CaptureDirections {
   title: string;
@@ -84,6 +104,7 @@ export interface MultiPhotoCatalog {
   counts: number[];
   layouts: (CompositionGeometry & { id: StripLayout; name: string })[];
   motion_layouts?: MotionLayoutChoice[];
+  new_year?: NewYearChoice[];
   creative?: {
     default_plan: CreativePlan;
     name: string;
@@ -154,8 +175,19 @@ export interface CreativeTreatment {
   id: string;
   name: string;
   description: string;
-  category?: 'treatment' | 'frame';
+  category?: 'treatment' | 'frame' | 'new-year-frame';
   result: CreativeResult | null;
+  preview?: string | null;
+  preview_width?: number | null;
+  preview_height?: number | null;
+}
+
+export function portraitFirst(
+  a: { preview_width?: number | null; preview_height?: number | null },
+  b: { preview_width?: number | null; preview_height?: number | null },
+): number {
+  return Number((a.preview_width ?? 0) > (a.preview_height ?? 0))
+    - Number((b.preview_width ?? 0) > (b.preview_height ?? 0));
 }
 
 interface FilmstripProgress {
