@@ -225,7 +225,12 @@ export class MultiPhotoStudio implements OnInit {
     if (this.plan()?.experience !== plan.experience) this.plan.set(plan);
   }
 
-  toggleNewYear(): void { this.newYearOpen.update(open => !open); }
+  toggleNewYear(): void {
+    const open = !this.newYearOpen();
+    const first = this.newYearOptions()[0];
+    if (open && this.plan()?.experience !== 'new-year' && first) this.chooseNewYear(first);
+    this.newYearOpen.set(open);
+  }
 
   chooseNewYear(template: NewYearChoice): void { this.plan.set(template.default_plan); }
 
