@@ -6,6 +6,7 @@ import { I18n } from '../shared/i18n';
   host: {
     class: 'secondary new-year-frame-button',
     '[attr.aria-label]': "i18n.text('studio.newYearFrames')",
+    '(click)': 'replayEntrance()',
   },
   template: `
     <span class="new-year-popper" aria-hidden="true"></span>
@@ -109,6 +110,7 @@ export class NewYearFramesButton {
   private readonly element = inject<ElementRef<HTMLButtonElement>>(ElementRef);
   private observer?: IntersectionObserver;
   private cleanupTimer?: ReturnType<typeof setTimeout>;
+  private replayFrame?: number;
 
   constructor() {
     const destroy = inject(DestroyRef);
@@ -124,12 +126,27 @@ export class NewYearFramesButton {
     destroy.onDestroy(() => {
       this.observer?.disconnect();
       clearTimeout(this.cleanupTimer);
+      if (this.replayFrame !== undefined) cancelAnimationFrame(this.replayFrame);
+    });
+  }
+
+  protected replayEntrance(): void {
+    this.observer?.disconnect();
+    if (this.replayFrame !== undefined) cancelAnimationFrame(this.replayFrame);
+    // Wait for the gallery toggle to finish resizing the button before placing the burst.
+    this.replayFrame = requestAnimationFrame(() => {
+      this.replayFrame = undefined;
+      this.playEntrance();
     });
   }
 
   private playEntrance(): void {
     const button = this.element.nativeElement;
     if (button.disabled || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    clearTimeout(this.cleanupTimer);
+    button.classList.remove('new-year-entering');
+    // Restart even when a second click arrives before the previous animation ends.
+    void button.offsetWidth;
     const width = button.clientWidth, height = button.clientHeight;
     const bleed = 21;
     const targets = [[-bleed, 7], [width * .18, -bleed], [width * .52, -bleed], [width * .83, -bleed],

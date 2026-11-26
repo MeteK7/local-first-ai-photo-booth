@@ -21,7 +21,7 @@ The Creative Studio migration adds `creative_results` and references for the exi
 
 ## Verify
 
-- In both shooting sections, check the red **New Year Frames** button with its 34px party-popper icon and 24px confetti extending 14px beyond the border. A short pop, glow and confetti burst plays once when the button enters view; opening the gallery or switching languages must not replay it. Reduced-motion mode retains the static design. Frame preview dimensions and aspect ratios remain unchanged.
+- In both shooting sections, check the red **New Year Frames** button with its 34px party-popper icon and 24px confetti extending 14px beyond the border. A short pop, glow and confetti burst plays when the button first enters view and replays on each click, including repeated clicks before the previous burst finishes. Keyboard activation also replays it; switching languages does not. Reduced-motion mode retains the static design. Frame preview dimensions and aspect ratios remain unchanged.
 - In Multi-Photo Studio, switch from **Motion Study** to **New Year Frames**. Opening the collection immediately selects its first frame and replaces the previous mode's description, layout controls and composition preview. Closing and reopening the gallery retains the chosen New Year frame; choosing another collection closes the gallery. On desktop, Signature Strip and the three side-by-side Creative Collection buttons align with the New Year button and fill the same height.
 - Run the backend renderer tests to check orientation, deterministic output, print sizes, and Classic Filter parity.
 - Run the PostgreSQL and Angular suites to check retries, selected-result routing, access isolation, and the existing single-photo and filmstrip flows.
