@@ -322,13 +322,21 @@ p, dt { color: var(--muted); line-height: 1.6; }
   border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 .studio-frame-toggle[aria-expanded="true"] .studio-frame-chevron { transform: rotate(225deg); }
+.studio, .multi-photo { container-name: studio; container-type: inline-size; }
 .studio-treatments:has(.new-year-frame-button) {
-  grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 14px;
+  grid-template-columns: minmax(0, 4fr); grid-auto-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(112px, auto); grid-auto-flow: column; gap: 12px; margin-top: 24px;
 }
-.studio-treatments .new-year-frame-button { grid-column: span 2; grid-row: span 2; }
+.studio-treatments:has(.new-year-frame-button) > .secondary:not(.new-year-frame-button) {
+  min-width: 0; min-height: 64px; padding-inline: 8px; line-height: 1.25;
+  text-wrap: balance; overflow-wrap: anywhere;
+}
+.studio-treatments:has(.new-year-frame-button) > .studio-frame-toggle:not(.new-year-frame-button) {
+  flex-direction: column; gap: 6px;
+}
 .multi-photo-collections:has(.new-year-frame-button) {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(220px, 1.2fr);
-  grid-template-rows: auto minmax(100px, 1fr); gap: 24px 12px;
+  grid-template-columns: minmax(220px, 4fr) minmax(0, 1.5fr) minmax(0, 4.5fr);
+  grid-template-rows: auto minmax(112px, 1fr); gap: 24px 12px;
 }
 .multi-photo-collections:has(.new-year-frame-button) .multi-photo-collection {
   /* Share header and button rows so wrapped collection names keep the buttons aligned. */
@@ -337,18 +345,29 @@ p, dt { color: var(--muted); line-height: 1.6; }
 .multi-photo-collections:has(.new-year-frame-button) .multi-photo-creative-modes {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.studio .studio-treatments > .new-year-frame-button,
 .multi-photo-collections .multi-new-year-collection > .new-year-frame-button { margin-top: 0; }
-@media (max-width: 680px) {
-  .studio-treatments:has(.new-year-frame-button) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .studio-treatments .new-year-frame-button { grid-column: 1 / -1; grid-row: auto; }
+@container studio (max-width: 840px) {
+  .studio-treatments:has(.new-year-frame-button) {
+    grid-template-columns: minmax(0, 4fr) repeat(3, minmax(0, 2fr));
+    grid-template-rows: repeat(2, minmax(68px, 1fr));
+  }
+  .studio-treatments .new-year-frame-button { grid-row: 1 / -1; }
 }
-@media (max-width: 900px) {
+@container studio (max-width: 660px) {
   .multi-photo-collections:has(.new-year-frame-button) {
     grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 16px;
   }
   .multi-photo-collections:has(.new-year-frame-button) .multi-photo-collection {
     grid-row: auto; grid-template-rows: auto minmax(60px, auto); row-gap: 24px;
   }
+}
+@container studio (max-width: 560px) {
+  .studio-treatments:has(.new-year-frame-button) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(100px, auto) repeat(2, minmax(68px, 1fr));
+  }
+  .studio-treatments .new-year-frame-button { grid-column: 1 / -1; grid-row: 1; }
 }
 .studio-frame-options {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 18px;

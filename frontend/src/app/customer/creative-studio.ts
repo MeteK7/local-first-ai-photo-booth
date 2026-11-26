@@ -164,7 +164,13 @@ export class CreativeStudio implements OnInit, OnDestroy {
   ngOnInit(): void { void this.refresh(); }
 
   protected toggleCollection(category: FrameCategory): void {
-    this.openCollection.update(open => open === category ? null : category);
+    if (this.sessionBusy() || this.deliveryPending()) return;
+    const open = this.openCollection() !== category;
+    this.openCollection.set(open ? category : null);
+    if (open && this.treatment()?.category !== category) {
+      const first = this.collections().find(collection => collection.category === category)?.items[0];
+      if (first) void this.choose(first);
+    }
   }
 
   selectOriginal(): void {

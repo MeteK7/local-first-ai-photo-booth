@@ -35,6 +35,14 @@ class CompositionPreview {
       @if (catalog(); as options) {
         @if (plan(); as selected) {
           <div class="multi-photo-collections">
+            @if (options.new_year?.length) {
+              <div class="multi-photo-collection multi-new-year-collection" role="group" aria-labelledby="new-year-collection">
+                <h2 id="new-year-collection">{{ i18n.text('studio.newYearCollection') }}</h2>
+                <button appNewYearFrames class="studio-frame-toggle" type="button"
+                        [aria-pressed]="selected.experience === 'new-year'" [attr.aria-expanded]="newYearOpen()"
+                        aria-controls="multi-new-year-options" [disabled]="starting()" (click)="toggleNewYear()"></button>
+              </div>
+            }
             <div class="multi-photo-collection" role="group" aria-labelledby="classic-collection">
               <h2 id="classic-collection">{{ i18n.text('studio.classicCollection') }}</h2>
               <button class="secondary" type="button" [aria-pressed]="selected.experience === 'signature-strip'"
@@ -47,14 +55,6 @@ class CompositionPreview {
                         [disabled]="starting()" (click)="chooseExperience(option.default_plan)">{{ i18n.text('studio.experience.' + option.default_plan.experience + '.name') }}</button>
               }
             </div>
-            @if (options.new_year?.length) {
-              <div class="multi-photo-collection multi-new-year-collection" role="group" aria-labelledby="new-year-collection">
-                <h2 id="new-year-collection">{{ i18n.text('studio.newYearCollection') }}</h2>
-                <button appNewYearFrames class="studio-frame-toggle" type="button"
-                        [aria-pressed]="selected.experience === 'new-year'" [attr.aria-expanded]="newYearOpen()"
-                        aria-controls="multi-new-year-options" [disabled]="starting()" (click)="toggleNewYear()"></button>
-              </div>
-            }
           </div>
           @if (newYearOpen()) {
             <div id="multi-new-year-options" class="multi-new-year-options" role="group"
